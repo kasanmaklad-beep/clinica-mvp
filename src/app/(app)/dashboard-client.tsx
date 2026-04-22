@@ -154,7 +154,8 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
   const totConsBs = reporte.consultas.reduce((s, c) => s + c.totalBs, 0);
   const totConsDiv = reporte.consultas.reduce((s, c) => s + c.ingresoDivisa, 0);
   const totConsPac = reporte.consultas.reduce((s, c) => s + c.numPacientes, 0);
-  const totClinica = reporte.consultas.reduce((s, c) => s + c.porcentajeClinica, 0);
+  const totServiciosClinicaUsd = reporte.servicios.reduce((s, c) => s + c.totalBs, 0) / tasa;
+  const totClinica = reporte.consultas.reduce((s, c) => s + c.porcentajeClinica, 0) + totServiciosClinicaUsd;
 
   // Split Lab vs Imágenes
   const laboratorio = reporte.servicios.filter(s => s.categoria === "LABORATORIO" || s.categoria === "SERVICIO" || (!s.categoria));
