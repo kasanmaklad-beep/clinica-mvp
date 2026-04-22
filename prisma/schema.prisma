@@ -1,0 +1,171 @@
+// Hospital Clínicas del Este - MVP Reportes Operativos
+// SQLite para dev. Migrar a PostgreSQL (Neon/Supabase) para producción.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =========== USUARIOS Y AUTENTICACIÓN ===========
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("LECTOR") // ADMIN | CAPTURISTA | LECTOR
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reportesCreados  DailyReport[] @relation("CreadoPor")
+  reportesEditados DailyReport[] @relation("EditadoPor")
+}
+
+// =========== CATÁLOGOS ===========
+
+model Especialidad {
+  id               String  @id @default(cuid())
+  codigo           Int     @unique
+  nombre           String  @unique
+  // Modelo de negocio: honorario fijo por paciente que le corresponde a la clínica
+  honorarioClinica Float   @default(10.0)
+  // Descripción libre del modelo (ej: "50% honorarios", "$10 por consulta")
+  modeloNegocio    String  @default("Fijo por paciente")
+  orden            Int     @default(0)
+  activa           Boolean @default(true)
+
+  consultas ConsultaLinea[]
+}
+
+model UnidadServicio {
+  id        String  @id @default(cuid())
+  codigo    Int     @unique
+  nombre    String  @unique
+  categoria String  @default("LABORATORIO") // LABORATORIO | IMAGENES | SERVICIO
+  orden     Int     @default(0)
+  activa    Boolean @default(true)
+
+  servicios ServicioLinea[]
+}
+
+// Catálogo de aseguradoras — crece dinámicamente desde el formulario
+model Aseguradora {
+  id     String  @id @default(cuid())
+  nombre String  @unique
+  activa Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  anticipos        Anticipo[]
+  cuentasPorCobrar CuentaPorCobrar[]
+}
+
+// =========== REPORTE DIARIO ===========
+
+model DailyReport {
+  id            String    @id @default(cuid())
+  fecha         DateTime  @unique
+  tasaCambio    Float
+  estado        String    @default("BORRADOR") // BORRADOR | CERRADO
+  observaciones String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  cerradoAt     DateTime?
+
+  creadoPorId  String
+  creadoPor    User    @relation("CreadoPor", fields: [creadoPorId], references: [id])
+  editadoPorId String?
+  editadoPor   User?   @relation("EditadoPor", fields: [editadoPorId], references: [id])
+
+  consultas        ConsultaLinea[]
+  servicios        ServicioLinea[]
+  pacientesArea    PacienteArea[]
+  anticipos        Anticipo[]
+  cuentasPorCobrar CuentaPorCobrar[]
+  aps              APS?
+}
+
+model ConsultaLinea {
+  id                String        @id @default(cuid())
+  reporteId         String
+  reporte           DailyReport   @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  especialidadId    String
+  especialidad      Especialidad  @relation(fields: [especialidadId], references: [id])
+  numPacientes      Int           @default(0)
+  totalBs           Float         @default(0)  // Total ingreso en Bs. (moneda principal)
+  ingresoDivisa     Float         @default(0)  // Porción recibida en USD (ya incluida en totalBs convertido)
+  porcentajeClinica Float         @default(0)  // numPacientes × honorarioClinica
+  comentarios       String?
+
+  @@unique([reporteId, especialidadId])
+}
+
+model ServicioLinea {
+  id                String         @id @default(cuid())
+  reporteId         String
+  reporte           DailyReport    @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  unidadServicioId  String
+  unidadServicio    UnidadServicio @relation(fields: [unidadServicioId], references: [id])
+  numPacientes      Int            @default(0)
+  totalBs           Float          @default(0)
+  ingresoDivisa     Float          @default(0)
+  porcentajeClinica Float          @default(0)
+  comentarios       String?
+
+  @@unique([reporteId, unidadServicioId])
+}
+
+model PacienteArea {
+  id           String      @id @default(cuid())
+  reporteId    String
+  reporte      DailyReport @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  area         String // EMERGENCIA | HOSPITALIZACION | UCI
+  numPacientes Int         @default(0)
+  comentarios  String?
+
+  @@unique([reporteId, area])
+}
+
+model Anticipo {
+  id              String       @id @default(cuid())
+  reporteId       String
+  reporte         DailyReport  @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  tipo            String       // HOSPITALIZACION | EMERGENCIA | ESTUDIOS
+  totalBs         Float        @default(0)
+  ingresoDivisa   Float        @default(0)
+  numPacientes    Int          @default(1)
+  pacienteNombre  String?
+  comentarios     String?
+  estado          String       @default("PENDIENTE") // PENDIENTE | APLICADO
+  aseguradoraId   String?
+  aseguradora     Aseguradora? @relation(fields: [aseguradoraId], references: [id])
+}
+
+model CuentaPorCobrar {
+  id              String       @id @default(cuid())
+  reporteId       String
+  reporte         DailyReport  @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  nombreConvenio  String
+  totalBs         Float        @default(0)
+  ingresoDivisa   Float        @default(0)
+  numPacientes    Int          @default(0)
+  comentarios     String?
+  aseguradoraId   String?
+  aseguradora     Aseguradora? @relation(fields: [aseguradoraId], references: [id])
+}
+
+model APS {
+  id                      String      @id @default(cuid())
+  reporteId               String      @unique
+  reporte                 DailyReport @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  consultas               Int         @default(0)
+  laboratoriosImagenes    Int         @default(0)
+  movimientosDia          Int         @default(0)
+  totalFacturados         Int         @default(0)
+  noFacturadosComentarios String?
+  facturadosComentarios   String?
+}
