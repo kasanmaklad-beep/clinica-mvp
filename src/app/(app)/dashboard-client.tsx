@@ -224,10 +224,10 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
         </Button>
       </div>
 
-      {/* KPIs del día — % Clínica como métrica principal */}
+      {/* KPIs del día — Ingreso Clínica como métrica principal */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard icon={Percent} label="% Clínica $" value={fmtUsd(totClinica)} accent="text-emerald-600" big />
-        <KpiCard icon={DollarSign} label="% Clínica Bs." value={fmtBs(totClinica * tasa)} sub={`Tasa: ${tasa.toLocaleString()} Bs/$`} accent="text-amber-600" />
+        <KpiCard icon={Percent} label="Ingreso Clínica $" value={fmtUsd(totClinica)} accent="text-emerald-600" big />
+        <KpiCard icon={DollarSign} label="Ingreso Clínica Bs." value={fmtBs(totClinica * tasa)} sub={`Tasa: ${tasa.toLocaleString()} Bs/$`} accent="text-amber-600" />
         <KpiCard icon={Users} label="Pacientes" value={fmtInt(totalPac)} accent="text-[var(--primary)]" />
         <KpiCard icon={DollarSign} label="Facturado $" value={fmtUsd(totalDivisa)} accent="text-[var(--muted-foreground)]" />
       </div>
@@ -659,7 +659,7 @@ function ExecutiveMonthly({
                 {fmtUsd(current.clinicaUsd)}
               </div>
               <div className="text-xs text-[var(--muted-foreground)] mt-0.5 font-medium uppercase tracking-wide">
-                Ingreso clínica (% honorarios)
+                Ingreso Clínica $
               </div>
               <div className="mt-2 text-lg font-bold text-amber-600">
                 {fmtBs(current.clinicaBs)}
@@ -703,7 +703,7 @@ function ExecutiveMonthly({
                        tickFormatter={v => v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`} width={48} />
                 <Tooltip
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                  formatter={(v) => [fmtUsd(Number(v)), "% Clínica $"]}
+                  formatter={(v) => [fmtUsd(Number(v)), "Ingreso Clínica $"]}
                   cursor={{ fill: "var(--muted)" }}
                 />
                 <Bar dataKey="clinica" radius={[4, 4, 0, 0]} maxBarSize={36}>

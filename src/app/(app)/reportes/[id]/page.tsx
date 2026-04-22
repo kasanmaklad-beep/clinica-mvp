@@ -41,6 +41,8 @@ export default async function ReporteDetallePage({ params }: Params) {
   const totalConsultasClinica = r.consultas.reduce((s, c) => s + c.porcentajeClinica, 0);
   const totalServiciosUsd = r.servicios.reduce((s, c) => s + c.ingresoDivisa, 0);
   const totalServiciosBs = r.servicios.reduce((s, c) => s + c.totalBs, 0);
+  const totalServiciosClinica = r.tasaCambio > 0 ? totalServiciosBs / r.tasaCambio : 0;
+  const totalClinicaUsd = totalConsultasClinica + totalServiciosClinica;
   const totalServiciosPac = r.servicios.reduce((s, c) => s + c.numPacientes, 0);
   const totalAnticiposUsd = r.anticipos.reduce((s, a) => s + a.ingresoDivisa, 0);
   const totalAnticiposBs = r.anticipos.reduce((s, a) => s + a.totalBs, 0);
@@ -85,7 +87,7 @@ export default async function ReporteDetallePage({ params }: Params) {
           { label: "Total USD", value: fmtUsd(totalGeneralUsd), color: "text-[var(--primary)]" },
           { label: "Total Bs.", value: fmtBs(totalGeneralBs), color: "" },
           { label: "Pacientes", value: fmtInt(totalConsultasPac + totalServiciosPac + totalCuentasPac), color: "" },
-          { label: "% Clínica", value: fmtUsd(totalConsultasClinica), color: "text-emerald-600" },
+          { label: "Ingreso Clínica $", value: fmtUsd(totalClinicaUsd), color: "text-emerald-600" },
         ].map((k) => (
           <Card key={k.label}>
             <CardContent className="p-3">
@@ -109,7 +111,7 @@ export default async function ReporteDetallePage({ params }: Params) {
                     <th className="p-3 font-medium text-right">Total $</th>
                     <th className="p-3 font-medium text-right">Total Bs.</th>
                     <th className="p-3 font-medium text-right">Pacientes</th>
-                    <th className="p-3 font-medium text-right">% Clínica</th>
+                    <th className="p-3 font-medium text-right">Ingreso Clínica $</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -149,6 +151,7 @@ export default async function ReporteDetallePage({ params }: Params) {
                     <th className="p-3 font-medium text-right">Total $</th>
                     <th className="p-3 font-medium text-right">Total Bs.</th>
                     <th className="p-3 font-medium text-right">Pacientes</th>
+                    <th className="p-3 font-medium text-right">Ingreso Clínica $</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -158,6 +161,7 @@ export default async function ReporteDetallePage({ params }: Params) {
                       <td className="p-3 text-right">{fmtUsd(s.ingresoDivisa)}</td>
                       <td className="p-3 text-right">{fmtBs(s.totalBs)}</td>
                       <td className="p-3 text-right font-medium">{s.numPacientes}</td>
+                      <td className="p-3 text-right text-emerald-600">{r.tasaCambio > 0 ? fmtUsd(s.totalBs / r.tasaCambio) : "—"}</td>
                     </tr>
                   ))}
                   <tr className="border-t-2 border-[var(--border)] bg-[var(--muted)] font-semibold">
@@ -165,6 +169,7 @@ export default async function ReporteDetallePage({ params }: Params) {
                     <td className="p-3 text-right">{fmtUsd(totalServiciosUsd)}</td>
                     <td className="p-3 text-right">{fmtBs(totalServiciosBs)}</td>
                     <td className="p-3 text-right">{fmtInt(totalServiciosPac)}</td>
+                    <td className="p-3 text-right text-emerald-600">{fmtUsd(totalServiciosClinica)}</td>
                   </tr>
                 </tbody>
               </table>
