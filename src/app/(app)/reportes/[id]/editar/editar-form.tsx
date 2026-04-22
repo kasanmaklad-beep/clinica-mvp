@@ -223,7 +223,7 @@ export function EditarReporteForm({
             <div className="text-right">Pacientes</div>
             <div className="text-right">Total Bs.</div>
             <div className="text-right">Divisa ($)</div>
-            <div className="text-right">% Clínica</div>
+            <div className="text-right">Ingreso Clínica $</div>
           </div>
           {especialidades.map((esp, idx) => {
             const row = consultas[idx];
@@ -407,7 +407,7 @@ export function EditarReporteForm({
           <div><div className="text-xs text-[var(--muted-foreground)]">Total Bs.</div><div className="text-xl font-bold">{fmtBs(totalBs)}</div></div>
           <div><div className="text-xs text-[var(--muted-foreground)]">Ingreso Divisa</div><div className="text-xl font-bold text-amber-600">{fmtUsd(totalDivisa)}</div></div>
           <div><div className="text-xs text-[var(--muted-foreground)]">Pacientes</div><div className="text-xl font-bold">{fmtInt(totalPac)}</div></div>
-          <div><div className="text-xs text-[var(--muted-foreground)]">% Clínica</div><div className="text-xl font-bold text-emerald-600">{fmtUsd(totConsultasClinica)}</div></div>
+          <div><div className="text-xs text-[var(--muted-foreground)]">Ingreso Clínica $</div><div className="text-xl font-bold text-emerald-600">{fmtUsd(totConsultasClinica)}</div></div>
         </div>
       </div>
 

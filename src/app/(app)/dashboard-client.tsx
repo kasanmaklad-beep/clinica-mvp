@@ -763,7 +763,7 @@ function ExecutiveMonthly({
               <div className="flex items-center gap-2 mb-3">
                 <Trophy className="h-4 w-4 text-emerald-600" />
                 <div className="font-semibold text-sm">Top 5 especialidades</div>
-                <span className="text-xs text-[var(--muted-foreground)]">por % clínica</span>
+                <span className="text-xs text-[var(--muted-foreground)]">por ingreso clínica $</span>
               </div>
               <div className="space-y-2">
                 {topEspecialidades.map((e, i) => (

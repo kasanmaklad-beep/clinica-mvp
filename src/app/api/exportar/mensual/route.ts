@@ -151,8 +151,8 @@ export async function GET(req: NextRequest) {
     ["Convenios",   round2(cueDiv),  round2(cueBs),  cuePac,  rppArea(cueDiv,  cuePac),  pct(cueDiv)],
     ["TOTAL",       round2(totalClinicaUsd), round2(totalClinicaBs), totalPacientes, round2(rpp), "100%"],
     [],
-    ["TOP 5 ESPECIALIDADES (por % Clínica)"],
-    ["#", "Especialidad", "Pacientes", "% Clínica USD ($)"],
+    ["TOP 5 ESPECIALIDADES (por Ingreso Clínica $)"],
+    ["#", "Especialidad", "Pacientes", "Ingreso Clínica USD ($)"],
     ...topEsp.map(([nombre, v], i) => [i + 1, nombre, v.pac, round2(v.clinica)]),
   ];
 
