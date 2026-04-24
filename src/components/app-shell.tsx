@@ -17,6 +17,7 @@ import {
   Stethoscope,
   KeyRound,
   Wallet,
+  Merge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { href: "/reportes", label: "Histórico", icon: History, roles: ["ADMIN", "CAPTURISTA", "LECTOR"] },
   { href: "/cartera", label: "Cartera", icon: Wallet, roles: ["ADMIN", "CAPTURISTA", "LECTOR"] },
   { href: "/importar", label: "Importar reporte", icon: FileSpreadsheet, roles: ["ADMIN", "CAPTURISTA"] },
+  { href: "/admin/convenios", label: "Convenios", icon: Merge, roles: ["ADMIN"] },
   { href: "/admin/usuarios", label: "Usuarios", icon: Users, roles: ["ADMIN"] },
   { href: "/admin/catalogos", label: "Catálogos", icon: Settings, roles: ["ADMIN"] },
 ];
