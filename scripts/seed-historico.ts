@@ -373,6 +373,9 @@ async function importarReporte(
   // Consultas
   const consultas = [];
   for (const r of parsed.consultas) {
+    // "APS" como fila en consultas se ignora: son consultas del programa APS que
+    // ya están contadas en la sección UNIDAD DE APS del mismo reporte.
+    if (norm(r.name) === "aps") continue;
     const esp = espMap.get(norm(r.name));
     if (!esp) { warnings.push(`Especialidad no encontrada: "${r.name}"`); continue; }
     if (r.numPac === 0 && r.totalBs === 0 && r.totalDolar === 0) continue;
@@ -481,6 +484,18 @@ async function main() {
     espMap.set("ginecologia regenertiva", gin);
     espMap.set("ginecologia regeneretiva", gin);
     espMap.set("ginecoloia regenerativa", gin);
+  }
+  // Hemato-Oncología → Oncología (sub-variante, no es especialidad separada)
+  if (espMap.has("oncologia")) {
+    const onc = espMap.get("oncologia")!;
+    espMap.set("hemato-oncologia", onc);
+    espMap.set("hemato oncologia", onc);
+  }
+  // PRE-ANESTESIA → Anestesiología
+  if (espMap.has("anestesiologia")) {
+    const ane = espMap.get("anestesiologia")!;
+    espMap.set("pre-anestesia", ane);
+    espMap.set("pre anestesia", ane);
   }
   const uniMap = new Map(unidades.map(u => [norm(u.nombre), u.id]));
 

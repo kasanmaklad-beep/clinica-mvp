@@ -18,7 +18,11 @@ export default async function HistoricoPage() {
 
   const reportes = await prisma.dailyReport.findMany({
     orderBy: { fecha: "desc" },
-    include: {
+    select: {
+      id: true,
+      fecha: true,
+      estado: true,
+      tasaCambio: true,
       _count: { select: { anticipos: true } },
       consultas: { select: { ingresoDivisa: true, totalBs: true, numPacientes: true } },
       servicios: { select: { ingresoDivisa: true, totalBs: true, numPacientes: true } },
@@ -56,14 +60,14 @@ export default async function HistoricoPage() {
     }
     const bucket = grouped.get(key)!;
     const lineas = [...r.consultas, ...r.servicios];
-    const totalDiv =
-      lineas.reduce((s, x) => s + x.ingresoDivisa, 0) +
-      r.anticipos.reduce((s, a) => s + a.ingresoDivisa, 0) +
-      r.cuentasPorCobrar.reduce((s, c) => s + c.ingresoDivisa, 0);
+    // Facturación bruta total del día en Bs (todo lo cobrado, independiente del medio)
     const totalBs =
       lineas.reduce((s, x) => s + x.totalBs, 0) +
       r.anticipos.reduce((s, a) => s + a.totalBs, 0) +
       r.cuentasPorCobrar.reduce((s, c) => s + c.totalBs, 0);
+    // Bruto total en USD: convertido a la tasa del día. Coincide con la vista dashboard.
+    const dayTasa = r.tasaCambio || 1;
+    const totalDiv = totalBs / dayTasa;
     const totalPac =
       lineas.reduce((s, x) => s + x.numPacientes, 0) +
       r.cuentasPorCobrar.reduce((s, c) => s + c.numPacientes, 0);

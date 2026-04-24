@@ -112,11 +112,10 @@ export default async function DashboardPage() {
     const labRows = r.servicios.filter(s => s.unidadServicio.categoria !== "IMAGENES");
     const imgRows = r.servicios.filter(s => s.unidadServicio.categoria === "IMAGENES");
 
-    // Consultas
+    // Consultas — bruto (totalBs/tasa). Opción A: toda la facturación, sin importar medio.
     const consBs         = r.consultas.reduce((s, x) => s + x.totalBs, 0);
     const consPac        = r.consultas.reduce((s, x) => s + x.numPacientes, 0);
-    const consClinicaUsd = r.consultas.reduce((s, x) => s + x.porcentajeClinica, 0);
-    const consClinicaBs  = consClinicaUsd * tasa;
+    const consUsd        = consBs / tasa;
 
     // Lab / Imágenes
     const labBs  = labRows.reduce((s, x) => s + x.totalBs, 0);
@@ -133,8 +132,10 @@ export default async function DashboardPage() {
     const cueUsd = cueBs / tasa;
     const cuePac = r.cuentasPorCobrar.reduce((s, c) => s + c.numPacientes, 0);
 
-    const dayClinicaUsd = consClinicaUsd + labUsd + imgUsd + antUsd + cueUsd;
-    const dayClinicaBs  = consClinicaBs  + labBs  + imgBs  + antBs  + cueBs;
+    // Total del día = facturación bruta total (Opción A): todo lo cobrado, sin
+    // importar cómo se pagó. Coincide con el histórico.
+    const dayClinicaUsd = consUsd + labUsd + imgUsd + antUsd + cueUsd;
+    const dayClinicaBs  = consBs  + labBs  + imgBs  + antBs  + cueBs;
 
     const existing = monthMap.get(mk) ?? {
       mes: mk,
@@ -149,13 +150,13 @@ export default async function DashboardPage() {
     };
 
     existing.totalBs    += consBs + labBs + imgBs + antBs + cueBs;
-    existing.totalDiv   += consClinicaUsd + labUsd + imgUsd + antUsd + cueUsd;
+    existing.totalDiv   += consUsd + labUsd + imgUsd + antUsd + cueUsd;
     existing.pacientes  += consPac + labPac + imgPac + cuePac;
     existing.dias       += 1;
     existing.clinicaUsd += dayClinicaUsd;
     existing.clinicaBs  += dayClinicaBs;
     existing.consultasBs  += consBs;
-    existing.consultasDiv += consClinicaUsd;
+    existing.consultasDiv += consUsd; // bruto consultas (Opción A)
     existing.labBs  += labBs;
     existing.labDiv += labUsd;
     existing.imgBs  += imgBs;
