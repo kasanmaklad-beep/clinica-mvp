@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canEditReports } from "@/lib/roles";
-import { DashboardClient, ReporteDashboard, DayData, MonthData, TopEspecialidad } from "./dashboard-client";
+import { DashboardClient, ReporteDashboard, DayData, MonthData, TopEspecialidad, DevaluacionData } from "./dashboard-client";
+import { devaluacionPct } from "@/lib/devaluacion";
 
 export const dynamic = "force-dynamic";
 
@@ -204,6 +205,34 @@ export default async function DashboardPage() {
       .slice(0, 5);
   }
 
+  // ─── Devaluación: últimas tasas (hoy, ayer, 7d, 30d) ───────────────────────
+  // allReports está ordenado desc (más reciente primero)
+  const tasaHoy = allReports[0]?.tasaCambio ?? 0;
+  const tasaAyer = allReports[1]?.tasaCambio ?? 0;
+  // Buscar tasa ~7 días atrás y ~30 días atrás
+  const findTasaNDias = (n: number): number => {
+    if (allReports.length === 0) return 0;
+    const ref = allReports[0].fecha.getTime();
+    const target = ref - n * 24 * 60 * 60 * 1000;
+    // primer reporte cuya fecha <= target
+    for (const r of allReports) {
+      if (r.fecha.getTime() <= target) return r.tasaCambio;
+    }
+    return allReports[allReports.length - 1].tasaCambio;
+  };
+  const tasa7d = findTasaNDias(7);
+  const tasa30d = findTasaNDias(30);
+
+  const devaluacion: DevaluacionData = {
+    tasa: tasaHoy,
+    diaPct: devaluacionPct(tasaAyer, tasaHoy),
+    semanaPct: devaluacionPct(tasa7d, tasaHoy),
+    mesPct: devaluacionPct(tasa30d, tasaHoy),
+    tasaAyer,
+    fechaHoy: allReports[0]?.fecha.toISOString() ?? null,
+    fechaAyer: allReports[1]?.fecha.toISOString() ?? null,
+  };
+
   const initialReporte = reportesLista.length > 0 ? await cargarReporte(reportesLista[0].id) : null;
 
   return (
@@ -214,6 +243,7 @@ export default async function DashboardPage() {
       chartData={chartData}
       months={months}
       allTopEspecialidades={allTopEspecialidades}
+      devaluacion={devaluacion}
     />
   );
 }

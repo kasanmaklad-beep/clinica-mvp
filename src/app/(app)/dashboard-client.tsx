@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { fmtUsd, fmtBs, fmtInt } from "@/lib/utils";
+import { fmtPct } from "@/lib/devaluacion";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -15,6 +16,7 @@ import {
   ChevronLeft, ChevronRight, ClipboardList, Users, DollarSign, Percent,
   ChevronDown, Stethoscope, FlaskConical, HandCoins, Activity, BedDouble, FileText,
   TrendingUp, TrendingDown, Minus, Sparkles, Trophy, Calendar, FileDown,
+  AlertTriangle,
 } from "lucide-react";
 
 export interface DayData {
@@ -64,6 +66,16 @@ export interface TopEspecialidad {
   pctChange: number | null;
 }
 
+export interface DevaluacionData {
+  tasa: number;
+  tasaAyer: number;
+  diaPct: number;
+  semanaPct: number;
+  mesPct: number;
+  fechaHoy: string | null;
+  fechaAyer: string | null;
+}
+
 export interface ReporteDashboard {
   id: string;
   fecha: string;
@@ -88,9 +100,10 @@ interface Props {
   chartData: DayData[];
   months: MonthData[];
   allTopEspecialidades: Record<string, TopEspecialidad[]>;
+  devaluacion: DevaluacionData;
 }
 
-export function DashboardClient({ reportesLista, initialReporte, canCreate, chartData, months, allTopEspecialidades }: Props) {
+export function DashboardClient({ reportesLista, initialReporte, canCreate, chartData, months, allTopEspecialidades, devaluacion }: Props) {
   const [idx, setIdx] = useState(0);
   const [reporte, setReporte] = useState<ReporteDashboard | null>(initialReporte);
   const [loading, setLoading] = useState(false);
@@ -195,6 +208,9 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
           allTopEspecialidades={allTopEspecialidades}
         />
       )}
+
+      {/* ═════════ DEVALUACIÓN ═════════ */}
+      {devaluacion.tasa > 0 && <DevaluacionBanner data={devaluacion} />}
 
       {/* ═════════ DETALLE DIARIO ═════════ */}
       <div className="pt-2 border-t border-[var(--border)]">
@@ -812,6 +828,102 @@ function ExecutiveMonthly({
         )}
       </div>
     </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// DEVALUACIÓN — Banner de pérdida cambiaria
+// ══════════════════════════════════════════════════════════════
+function DevaluacionBanner({ data }: { data: DevaluacionData }) {
+  const { diaPct, semanaPct, mesPct, tasa, tasaAyer } = data;
+
+  // El Bs pierde valor cuando la tasa sube → devaluacion > 0 es "malo" para saldos en Bs
+  const severity =
+    diaPct >= 1 ? "alta" : diaPct >= 0.3 ? "media" : diaPct > 0 ? "baja" : "neutra";
+
+  const bg =
+    severity === "alta"
+      ? "from-red-500/15 via-red-500/5 to-transparent border-red-500/30"
+      : severity === "media"
+      ? "from-amber-500/15 via-amber-500/5 to-transparent border-amber-500/30"
+      : severity === "baja"
+      ? "from-yellow-500/10 via-yellow-500/5 to-transparent border-yellow-500/20"
+      : "from-emerald-500/10 via-emerald-500/5 to-transparent border-emerald-500/20";
+
+  const colorPrincipal =
+    severity === "alta"
+      ? "text-red-600"
+      : severity === "media"
+      ? "text-amber-600"
+      : severity === "baja"
+      ? "text-yellow-600"
+      : "text-emerald-600";
+
+  const IconoPrincipal = severity === "neutra" ? TrendingDown : AlertTriangle;
+
+  // Pérdida en USD sobre un saldo hipotético de Bs 1,000,000 entre ayer y hoy
+  const ejemplo = tasaAyer > 0 && tasa > 0
+    ? 1_000_000 / tasaAyer - 1_000_000 / tasa
+    : 0;
+
+  return (
+    <Card className={`bg-gradient-to-br ${bg}`}>
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className={`shrink-0 h-10 w-10 rounded-lg flex items-center justify-center ${colorPrincipal} bg-white/40 dark:bg-black/20`}>
+              <IconoPrincipal className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs uppercase tracking-wider text-[var(--muted-foreground)] font-semibold">
+                Devaluación del Bolívar
+              </div>
+              <div className={`mt-1 text-3xl sm:text-4xl font-black tracking-tight ${colorPrincipal}`}>
+                {fmtPct(diaPct)}
+              </div>
+              <div className="text-xs text-[var(--muted-foreground)] mt-1">
+                Tasa hoy: <strong>{tasa.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> Bs/$
+                {tasaAyer > 0 && (
+                  <> · ayer: <strong>{tasaAyer.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-3 sm:gap-5 text-right">
+            <div>
+              <div className="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold tracking-wider">7 días</div>
+              <div className={`text-lg font-bold ${semanaPct >= 1 ? "text-red-500" : semanaPct > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                {fmtPct(semanaPct)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-[var(--muted-foreground)] font-semibold tracking-wider">30 días</div>
+              <div className={`text-lg font-bold ${mesPct >= 3 ? "text-red-500" : mesPct > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                {fmtPct(mesPct)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {ejemplo > 0 && (
+          <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-[var(--muted-foreground)] flex items-center gap-2">
+            <span>Ejemplo: Bs 1.000.000 cobrados ayer → perdieron</span>
+            <strong className={colorPrincipal}>{fmtUsd(ejemplo)}</strong>
+            <span>en un día por devaluación.</span>
+          </div>
+        )}
+
+        <div className="mt-2">
+          <Link
+            href="/cartera"
+            className="text-xs font-medium text-[var(--primary)] hover:underline inline-flex items-center gap-1"
+          >
+            Ver pérdida cambiaria por convenio <ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
