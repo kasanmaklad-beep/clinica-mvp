@@ -102,69 +102,162 @@ interface DataRow {
   comentarios: string;
 }
 
-function findColPos(lines: string[], fromIdx: number): {
-  colBs: number; colDolar: number; colPac: number; colClinica: number; colCom: number; headerEnd: number;
-} | null {
-  // Find the line that contains "Total Bs." (up to 6 lines ahead)
-  let primaryHeader = "";
-  let lastHeaderLine = fromIdx;
+/**
+ * Busca la línea del header "Total Bs." en la sección para saber
+ * dónde empiezan las filas de datos. Usa tokens (split por 2+ espacios)
+ * y NO posiciones fijas de columna — las posiciones rompen cuando un
+ * número o nombre rebasa el ancho nominal de la celda y queda
+ * right-alineado una posición a la izquierda del header (bug histórico).
+ */
+function findHeaderEnd(lines: string[], fromIdx: number): number | null {
   for (let i = fromIdx; i < Math.min(fromIdx + 6, lines.length); i++) {
-    if (lines[i].includes("Total Bs.")) {
-      primaryHeader = lines[i];
-      lastHeaderLine = i;
+    if (lines[i].includes("Total Bs.")) return i;
+  }
+  return null;
+}
+
+/** Es entero puro (ni puntos ni comas). */
+const isInteger = (s: string) => /^\d+$/.test(s);
+/** Es un monto: solo dígitos/puntos/comas Y contiene al menos un punto o coma. */
+const isMoney = (s: string) => /^[\d.,]+$/.test(s) && /[.,]/.test(s);
+
+/**
+ * Parser estándar para CONSULTAS / SERVICIOS / ANTICIPOS.
+ * Formato:  CODE NOMBRE  TOTAL_$  TOTAL_BS  NUMPAC  [PCT_CLINICA]  [COMENTARIO]
+ *
+ * numPac es el primer entero puro que aparece DESPUÉS de 2 montos consecutivos
+ * (así distinguimos entero-pacientes de token "0" en money columns).
+ */
+function parseStandardRow(tokens: string[]): DataRow | null {
+  if (tokens.length < 4) return null;
+  if (!isInteger(tokens[0])) return null;
+
+  let numPacIdx = -1;
+  for (let i = 3; i < tokens.length; i++) {
+    if (isInteger(tokens[i]) && isMoney(tokens[i - 1]) && isMoney(tokens[i - 2])) {
+      numPacIdx = i;
       break;
     }
   }
-  if (!primaryHeader) return null;
+  if (numPacIdx === -1) {
+    for (let i = 3; i < tokens.length; i++) {
+      if (isInteger(tokens[i])) { numPacIdx = i; break; }
+    }
+  }
+  if (numPacIdx === -1 || numPacIdx < 3) return null;
 
-  // Use positions within the primary header line (avoids offset from merged multi-line headers)
-  const colBs = primaryHeader.indexOf("Total Bs.");
-  const colDolar = primaryHeader.indexOf("Total $");
-  const colPacRaw = primaryHeader.search(/N°\s+de\s+Pacientes|Pacientes/);
-  const colClinica = primaryHeader.indexOf("% $.Clinica");
-  const colCom = primaryHeader.indexOf("Comentarios");
+  // El nombre es todo lo textual hasta el primer token monetario ($ o número con decimal).
+  // Esto es robusto frente a PDFs viejos con columnas extra "EFECTIVO $ HCDE / MEDICOS"
+  // que meten tokens "70,00 $ 140,00" entre el nombre y Total $.
+  const nameParts: string[] = [];
+  for (let i = 1; i < numPacIdx - 2; i++) {
+    const t = tokens[i];
+    if (isMoney(t) || t === "$") break;
+    nameParts.push(t);
+  }
+  const nombre = nameParts.join(" ").trim();
+  if (!nombre || nombre.length < 2) return null;
+  const totalDolar = parseNum(tokens[numPacIdx - 2]);
+  const totalBs = parseNum(tokens[numPacIdx - 1]);
+  const numPac = parseInt(tokens[numPacIdx]) || 0;
 
-  return {
-    colBs, colDolar: colDolar >= 0 ? colDolar : -1,
-    colPac: colPacRaw >= 0 ? colPacRaw : colBs + 18,
-    colClinica: colClinica >= 0 ? colClinica : -1,
-    colCom: colCom >= 0 ? colCom : -1,
-    headerEnd: lastHeaderLine,
-  };
+  let porcClinica = 0, comentarios = "";
+  const rest = tokens.slice(numPacIdx + 1);
+  if (rest.length > 0) {
+    if (isMoney(rest[0])) { porcClinica = parseNum(rest[0]); comentarios = rest.slice(1).join(" ").trim(); }
+    else comentarios = rest.join(" ").trim();
+  }
+  return { name: nombre, totalDolar, totalBs, numPac, porcClinica, comentarios };
 }
 
-function extractDataRows(lines: string[], sectionStart: number, sectionEnd: number): DataRow[] {
-  const cols = findColPos(lines, sectionStart + 1);
-  if (!cols) return [];
+/**
+ * Parser para CUENTAS POR COBRAR / CONVENIOS.
+ * Formato distinto (sin numPac):  CODE NOMBRE  TOTAL_$  TOTAL_BS  $  AMOUNT_USD
+ *
+ * Reconocible porque algún token es "$" solo (separador de columna USD).
+ * El último token antes del fin es el monto en USD (ingresoDivisa).
+ */
+function parseCuentasRow(tokens: string[]): DataRow | null {
+  if (tokens.length < 4) return null;
+  if (!isInteger(tokens[0])) return null;
+
+  // Localizar el "$" que marca el inicio de la columna de USD
+  const dollarIdx = tokens.findIndex((t, i) => i > 0 && t === "$");
+  if (dollarIdx === -1) return null;
+  // Debe venir al menos un token monetario después
+  if (dollarIdx === tokens.length - 1) return null;
+  const montoUsd = parseNum(tokens[dollarIdx + 1]);
+
+  // Antes del "$" deben estar TOTAL_$ y TOTAL_BS al final
+  if (dollarIdx < 3) return null;
+  const totalBs = parseNum(tokens[dollarIdx - 1]);
+  const totalDolar = parseNum(tokens[dollarIdx - 2]);
+  const nombre = tokens.slice(1, dollarIdx - 2).join(" ").trim();
+  if (!nombre || nombre.length < 2) return null;
+
+  return {
+    name: nombre,
+    totalDolar,
+    totalBs,
+    numPac: 0,
+    porcClinica: 0,
+    comentarios: "",
+    // cuentas lleva ingresoDivisa en la col USD del PDF, no en totalDolar
+    // (guardamos el monto USD en comentarios como marcador temporal)
+    _cuentasIngresoUsd: montoUsd,
+  } as DataRow & { _cuentasIngresoUsd?: number };
+}
+
+function extractDataRows(
+  lines: string[],
+  sectionStart: number,
+  sectionEnd: number,
+  section: "standard" | "cuentas" = "standard"
+): DataRow[] {
+  const headerEnd = findHeaderEnd(lines, sectionStart + 1);
+  if (headerEnd === null) return [];
 
   const rows: DataRow[] = [];
-  for (let i = cols.headerEnd + 1; i < sectionEnd; i++) {
+  // Cuentas pueden ocupar varias líneas: guardamos una línea "pendiente" cuando
+  // el nombre ocupa 2 líneas y los montos vienen en la siguiente.
+  let pendingName = "";
+
+  for (let i = headerEnd + 1; i < sectionEnd; i++) {
     const line = lines[i];
     if (!line || !line.trim()) continue;
     if (/Totales|Total General/i.test(line)) continue;
     if (/^[\s═─]+$/.test(line)) continue;
-    // Debe iniciar con N° (número) seguido del nombre
+
+    const tokens = line.trim().split(/\s{2,}/);
+
+    // Línea sin código pero con nombre + posibles montos al final (cuentas multi-línea)
+    if (section === "cuentas" && !/^\s*\d+\s/.test(line)) {
+      // Puede ser: "Dr. JOSÉ N. MARCANO (ABONO A" (solo nombre)
+      //        o: "2.000,00   0,00" (solo montos — continuación)
+      if (tokens.length === 1 && !isMoney(tokens[0])) {
+        pendingName = pendingName ? `${pendingName} ${tokens[0]}` : tokens[0];
+      }
+      continue;
+    }
+
     if (!/^\s*\d+\s/.test(line)) continue;
 
-    const nameEnd = Math.min(
-      cols.colDolar > 0 ? cols.colDolar - 1 : 999,
-      cols.colBs - 1,
-    );
-    const rawName = line.substring(0, nameEnd).replace(/^\s*\d+\s+/, "").trim();
-    if (!rawName || rawName.length < 2) continue;
+    let row: DataRow | null = null;
+    if (section === "cuentas") {
+      // Intento de fila estándar primero (con numPac)
+      row = parseStandardRow(tokens);
+      // Si falla, intentar formato cuentas con "$"
+      if (!row) row = parseCuentasRow(tokens);
+      // Aplicar pendingName si existe (nombre que venía de la línea anterior)
+      if (row && pendingName) {
+        row.name = `${pendingName} ${row.name}`.trim();
+        pendingName = "";
+      }
+    } else {
+      row = parseStandardRow(tokens);
+    }
 
-    const get = (start: number, end: number) =>
-      start >= 0 ? line.substring(start, end > start ? end : start + 20).trim() : "";
-
-    const totalDolar = cols.colDolar >= 0 ? parseNum(get(cols.colDolar, cols.colBs - 1)) : 0;
-    const totalBs = parseNum(get(cols.colBs, cols.colPac - 2));
-    const pacEnd = cols.colClinica > 0 ? cols.colClinica - 2 : cols.colPac + 15;
-    const numPac = parseInt(get(cols.colPac, pacEnd)) || 0;
-    const clinEnd = cols.colCom > 0 ? cols.colCom - 2 : cols.colClinica + 18;
-    const porcClinica = cols.colClinica > 0 ? parseNum(get(cols.colClinica, clinEnd)) : 0;
-    const comentarios = cols.colCom > 0 ? line.substring(cols.colCom).trim() : "";
-
-    rows.push({ name: rawName, totalDolar, totalBs, numPac, porcClinica, comentarios });
+    if (row) rows.push(row);
   }
   return rows;
 }
@@ -222,7 +315,7 @@ function parsePDF(pdfPath: string): ParsedReport | null {
   const consRows = iCons >= 0 ? extractDataRows(lines, iCons, endOf(iCons, iLab, iPac, iAnt, iCue, iAps)) : [];
   const labRows = iLab >= 0 ? extractDataRows(lines, iLab, endOf(iLab, iPac, iAnt, iCue, iAps)) : [];
   const antRows = iAnt >= 0 ? extractDataRows(lines, iAnt, endOf(iAnt, iCue, iAps)) : [];
-  const cueRows = iCue >= 0 ? extractDataRows(lines, iCue, endOf(iCue, iAps)) : [];
+  const cueRows = iCue >= 0 ? extractDataRows(lines, iCue, endOf(iCue, iAps), "cuentas") : [];
 
   // Pacientes por área
   const pacientesArea: ParsedReport["pacientesArea"] = [];
@@ -324,13 +417,21 @@ async function importarReporte(
   }
 
   // Cuentas por cobrar / Convenios
+  // En el PDF, la col "Comentarios" de cuentas contiene "$ MONTO_USD" → ese es
+  // el ingresoDivisa. El parser lo deja en _cuentasIngresoUsd. Como fallback,
+  // si no existe, usamos totalDolar (compatibilidad con formato alternativo).
   const cuentasPorCobrar = [];
   for (const r of parsed.cuentas) {
-    if (!r.name || (r.totalBs === 0 && r.totalDolar === 0)) continue;
+    if (!r.name) continue;
+    const ingresoDiv =
+      typeof (r as DataRow & { _cuentasIngresoUsd?: number })._cuentasIngresoUsd === "number"
+        ? (r as DataRow & { _cuentasIngresoUsd?: number })._cuentasIngresoUsd!
+        : r.totalDolar;
+    if (r.totalBs === 0 && ingresoDiv === 0 && r.totalDolar === 0) continue;
     cuentasPorCobrar.push({
       nombreConvenio: r.name.trim(),
       totalBs: r.totalBs,
-      ingresoDivisa: r.totalDolar,
+      ingresoDivisa: ingresoDiv,
       numPacientes: r.numPac || 0,
       comentarios: r.comentarios || undefined,
     });
@@ -358,6 +459,11 @@ async function importarReporte(
 // ───────── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
+  const replaceMode = process.argv.includes("--replace");
+  if (replaceMode) {
+    console.log("⚠️  MODO --replace ACTIVO: los reportes existentes serán REEMPLAZADOS.\n");
+  }
+
   const adminUser = await prisma.user.findFirst({ where: { role: "ADMIN" } });
   if (!adminUser) { console.error("❌ No hay usuario ADMIN en la base de datos."); process.exit(1); }
 
@@ -369,6 +475,13 @@ async function main() {
   const espMap = new Map(especialidades.map(e => [norm(e.nombre), { id: e.id, honorarioClinica: e.honorarioClinica }]));
   // Alias for common PDF misspellings
   if (espMap.has("oftalmologia")) espMap.set("oftamologia", espMap.get("oftalmologia")!);
+  if (espMap.has("ginecologia regenerativa")) {
+    // Typos en PDFs: "Regenertiva", "Regeneretiva", "Ginecoloia"
+    const gin = espMap.get("ginecologia regenerativa")!;
+    espMap.set("ginecologia regenertiva", gin);
+    espMap.set("ginecologia regeneretiva", gin);
+    espMap.set("ginecoloia regenerativa", gin);
+  }
   const uniMap = new Map(unidades.map(u => [norm(u.nombre), u.id]));
 
   const pdfs = fs.readdirSync(PDF_DIR).filter(f => f.toLowerCase().endsWith(".pdf")).sort();
@@ -398,9 +511,13 @@ async function main() {
     const fechaDate = new Date(parsed.fecha + "T12:00:00.000Z");
     const exists = await prisma.dailyReport.findUnique({ where: { fecha: fechaDate } });
     if (exists) {
-      console.log(`⏭️  Ya existe (${parsed.fecha})`);
-      skip++;
-      continue;
+      if (!replaceMode) {
+        console.log(`⏭️  Ya existe (${parsed.fecha}) — pasa --replace para reescribir`);
+        skip++;
+        continue;
+      }
+      // En modo replace: borra el reporte viejo (cascade borra sus líneas)
+      await prisma.dailyReport.delete({ where: { id: exists.id } });
     }
 
     // 3. Importar
