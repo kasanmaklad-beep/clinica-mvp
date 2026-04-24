@@ -112,10 +112,13 @@ export default async function DashboardPage() {
     const labRows = r.servicios.filter(s => s.unidadServicio.categoria !== "IMAGENES");
     const imgRows = r.servicios.filter(s => s.unidadServicio.categoria === "IMAGENES");
 
-    // Consultas — bruto (totalBs/tasa). Opción A: toda la facturación, sin importar medio.
-    const consBs         = r.consultas.reduce((s, x) => s + x.totalBs, 0);
+    // Consultas — la clínica sólo recibe "% $ Clínica" (honorario clínica, en USD
+    // convertido de Bs a la tasa del día). El resto del totalBs facturado es honorario
+    // del médico y NO entra a la clínica.
+    const consBs         = r.consultas.reduce((s, x) => s + x.totalBs, 0); // bruto facturado (para referencia)
     const consPac        = r.consultas.reduce((s, x) => s + x.numPacientes, 0);
-    const consUsd        = consBs / tasa;
+    const consClinicaUsd = r.consultas.reduce((s, x) => s + x.porcentajeClinica, 0);
+    const consClinicaBs  = consClinicaUsd * tasa;
 
     // Lab / Imágenes
     const labBs  = labRows.reduce((s, x) => s + x.totalBs, 0);
@@ -132,10 +135,12 @@ export default async function DashboardPage() {
     const cueUsd = cueBs / tasa;
     const cuePac = r.cuentasPorCobrar.reduce((s, c) => s + c.numPacientes, 0);
 
-    // Total del día = facturación bruta total (Opción A): todo lo cobrado, sin
-    // importar cómo se pagó. Coincide con el histórico.
-    const dayClinicaUsd = consUsd + labUsd + imgUsd + antUsd + cueUsd;
-    const dayClinicaBs  = consBs  + labBs  + imgBs  + antBs  + cueBs;
+    // Total del día = ingreso real que recibe la clínica.
+    // - Consultas: sólo el honorario clínica (% $ Clínica) — el resto va al médico.
+    // - Servicios/Anticipos/Convenios: totalBs completo (todo entra a la clínica).
+    // ingresoDivisa ya está contabilizado dentro de porcentajeClinica y totalBs.
+    const dayClinicaUsd = consClinicaUsd + labUsd + imgUsd + antUsd + cueUsd;
+    const dayClinicaBs  = consClinicaBs  + labBs  + imgBs  + antBs  + cueBs;
 
     const existing = monthMap.get(mk) ?? {
       mes: mk,
@@ -150,13 +155,13 @@ export default async function DashboardPage() {
     };
 
     existing.totalBs    += consBs + labBs + imgBs + antBs + cueBs;
-    existing.totalDiv   += consUsd + labUsd + imgUsd + antUsd + cueUsd;
+    existing.totalDiv   += consClinicaUsd + labUsd + imgUsd + antUsd + cueUsd;
     existing.pacientes  += consPac + labPac + imgPac + cuePac;
     existing.dias       += 1;
     existing.clinicaUsd += dayClinicaUsd;
     existing.clinicaBs  += dayClinicaBs;
-    existing.consultasBs  += consBs;
-    existing.consultasDiv += consUsd; // bruto consultas (Opción A)
+    existing.consultasBs  += consClinicaBs;   // Bs equivalente al honorario clínica de consultas
+    existing.consultasDiv += consClinicaUsd;  // honorario clínica de consultas en USD
     existing.labBs  += labBs;
     existing.labDiv += labUsd;
     existing.imgBs  += imgBs;

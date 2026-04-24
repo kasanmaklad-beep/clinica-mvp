@@ -24,10 +24,10 @@ export default async function HistoricoPage() {
       estado: true,
       tasaCambio: true,
       _count: { select: { anticipos: true } },
-      consultas: { select: { ingresoDivisa: true, totalBs: true, numPacientes: true } },
-      servicios: { select: { ingresoDivisa: true, totalBs: true, numPacientes: true } },
-      anticipos: { select: { ingresoDivisa: true, totalBs: true } },
-      cuentasPorCobrar: { select: { ingresoDivisa: true, totalBs: true, numPacientes: true } },
+      consultas: { select: { totalBs: true, numPacientes: true, porcentajeClinica: true } },
+      servicios: { select: { totalBs: true, numPacientes: true } },
+      anticipos: { select: { totalBs: true } },
+      cuentasPorCobrar: { select: { totalBs: true, numPacientes: true } },
     },
   });
 
@@ -59,17 +59,21 @@ export default async function HistoricoPage() {
       grouped.set(key, { key, label, totalDiv: 0, totalBs: 0, totalPac: 0, dias: [] });
     }
     const bucket = grouped.get(key)!;
-    const lineas = [...r.consultas, ...r.servicios];
-    // Facturación bruta total del día en Bs (todo lo cobrado, independiente del medio)
-    const totalBs =
-      lineas.reduce((s, x) => s + x.totalBs, 0) +
-      r.anticipos.reduce((s, a) => s + a.totalBs, 0) +
-      r.cuentasPorCobrar.reduce((s, c) => s + c.totalBs, 0);
-    // Bruto total en USD: convertido a la tasa del día. Coincide con la vista dashboard.
+    // Ingreso real de la clínica en el día.
+    // - Consultas: sólo honorario clínica (porcentajeClinica en USD). El resto del
+    //   totalBs facturado es honorario del médico y no entra a la clínica.
+    // - Servicios/Anticipos/Convenios: totalBs completo.
+    // ingresoDivisa ya está contabilizado dentro de porcentajeClinica y totalBs.
     const dayTasa = r.tasaCambio || 1;
-    const totalDiv = totalBs / dayTasa;
+    const consClinicaUsd = r.consultas.reduce((s, c) => s + c.porcentajeClinica, 0);
+    const servBs = r.servicios.reduce((s, x) => s + x.totalBs, 0);
+    const antBs  = r.anticipos.reduce((s, a) => s + a.totalBs, 0);
+    const cueBs  = r.cuentasPorCobrar.reduce((s, c) => s + c.totalBs, 0);
+    const totalDiv = consClinicaUsd + (servBs + antBs + cueBs) / dayTasa;
+    const totalBs  = consClinicaUsd * dayTasa + servBs + antBs + cueBs;
     const totalPac =
-      lineas.reduce((s, x) => s + x.numPacientes, 0) +
+      r.consultas.reduce((s, x) => s + x.numPacientes, 0) +
+      r.servicios.reduce((s, x) => s + x.numPacientes, 0) +
       r.cuentasPorCobrar.reduce((s, c) => s + c.numPacientes, 0);
 
     bucket.totalDiv += totalDiv;
