@@ -83,3 +83,56 @@ export const fmtPct = (pct: number): string => {
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(2)}%`;
 };
+
+// ═══════════════════════════════════════════════════════════════════════
+// PROYECCIÓN DE DEVALUACIÓN Y PÉRDIDA FUTURA
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Calcula la tasa de devaluación diaria efectiva (compound) observada entre
+ * dos puntos en el tiempo. Si la tasa subió de 400 a 480 en 30 días,
+ * devuelve la r tal que 400 * (1+r)^30 = 480.
+ *
+ * Retorna la tasa como decimal (0.006 = 0.6%/día), NO como porcentaje.
+ */
+export const tasaDiariaCompound = (
+  tasaAnterior: number,
+  tasaActual: number,
+  dias: number
+): number => {
+  if (!tasaAnterior || tasaAnterior <= 0 || !tasaActual || tasaActual <= 0 || dias <= 0) {
+    return 0;
+  }
+  return Math.pow(tasaActual / tasaAnterior, 1 / dias) - 1;
+};
+
+/**
+ * Proyecta la tasa del bolívar N días en el futuro asumiendo que la
+ * devaluación diaria compuesta continúa igual.
+ */
+export const proyectarTasa = (
+  tasaHoy: number,
+  diasAdelante: number,
+  tasaDiariaDecimal: number
+): number => {
+  if (!tasaHoy || tasaHoy <= 0) return 0;
+  return tasaHoy * Math.pow(1 + tasaDiariaDecimal, diasAdelante);
+};
+
+/**
+ * Pérdida en USD adicional si un saldo en Bs se mantiene sin cobrar durante
+ * N días más (desde hoy). Asume que la tasa de devaluación se mantiene.
+ *
+ * Ejemplo: Bs 1M, tasa hoy 500, devaluación 0.5%/día.
+ * En 30 días: tasa ≈ 580, el saldo vale $1724 en vez de $2000 → pérdida $276.
+ */
+export const perdidaProyectadaUsd = (
+  saldoBs: number,
+  tasaHoy: number,
+  diasAdelante: number,
+  tasaDiariaDecimal: number
+): number => {
+  const tasaFutura = proyectarTasa(tasaHoy, diasAdelante, tasaDiariaDecimal);
+  if (!tasaHoy || !tasaFutura || tasaHoy <= 0 || tasaFutura <= 0) return 0;
+  return saldoBs / tasaHoy - saldoBs / tasaFutura;
+};
