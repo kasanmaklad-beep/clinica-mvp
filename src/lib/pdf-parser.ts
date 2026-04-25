@@ -254,15 +254,20 @@ export function parsePdfText(text: string): PDFReporte {
       }
 
       case "cuentas": {
-        // [N°] CONVENIO  DIVISA  TOTAL_BS  $  MONTO_USD
+        // Formato real: [N°] CONVENIO  TOTAL_$  TOTAL_BS  [PACIENTES]  [%]  [$USD_COMENTARIO]
+        // - Pacientes y % suelen venir vacíos en convenios.
+        // - El "$X,XX" del comentario puede venir pegado al $ o con espacio.
+        // - Si no hay comentario $, igual capturamos la fila con TOTAL_$ como divisa.
         const m = line.match(
-          /^(?:\d+\s+)?(.+?)\s+([\d.,]+)\s+([\d.,]+)\s+\$\s+([\d.,]+)/
+          /^(?:\d+\s+)?(.+?)\s+([\d.,]+)\s+([\d.,]+)(?:\s+\d+)?(?:\s+[\d.,]+)?(?:\s+\$\s*([\d.,]+))?/
         );
         if (m)
           cuentas.push({
             nombreConvenio: m[1].trim(),
             totalBs: vzNum(m[3]),
-            ingresoDivisa: vzNum(m[4]),
+            // Prefiere $ del comentario (USD-equivalente que el dpto reporta);
+            // si no existe, cae al valor de la columna "Total $".
+            ingresoDivisa: vzNum(m[4] || m[2]),
           });
         break;
       }
