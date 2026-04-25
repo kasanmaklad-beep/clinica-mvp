@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import Link from "next/link";
 import { ArrowLeft, Pencil } from "lucide-react";
+import { DeleteReportButton } from "./delete-button";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -78,6 +79,9 @@ export default async function ReporteDetallePage({ params }: Params) {
               <Link href={`/reportes/${id}/editar`}><Pencil className="h-4 w-4" /> Editar</Link>
             </Button>
           ) : null}
+          {isAdmin(role) && (
+            <DeleteReportButton id={id} fecha={r.fecha.toISOString()} />
+          )}
         </div>
       </div>
 

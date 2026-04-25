@@ -86,3 +86,26 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   return NextResponse.json({ reporte: updated });
 }
+
+export async function DELETE(_req: Request, ctx: Ctx) {
+  const session = await auth();
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  if (!session?.user)
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (role !== "ADMIN")
+    return NextResponse.json(
+      { error: "Solo el administrador puede eliminar reportes" },
+      { status: 403 }
+    );
+
+  const { id } = await ctx.params;
+  const reporte = await prisma.dailyReport.findUnique({ where: { id } });
+  if (!reporte)
+    return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+
+  // Cascade en el schema (consultas, servicios, anticipos, cuentas, pacientesArea, APS)
+  // se encarga de borrar las filas hijas automáticamente.
+  await prisma.dailyReport.delete({ where: { id } });
+
+  return NextResponse.json({ ok: true, fecha: reporte.fecha });
+}
