@@ -1,163 +1,241 @@
 import { prisma } from "@/lib/prisma";
-import {
-  clasificarConvenio,
-  perdidaCambiariaUsd,
-  perdidaProyectadaUsd,
-  tasaDiariaCompound,
-  proyectarTasa,
-} from "@/lib/devaluacion";
-import { CarteraClient, type ConvenioAging, type ProyeccionData } from "./cartera-client";
+import { tasaDiariaCompound, proyectarTasa } from "@/lib/devaluacion";
+import { CarteraClient } from "./cartera-client";
 
 export const dynamic = "force-dynamic";
 
+const MS_DIA = 1000 * 60 * 60 * 24;
+
+const startOfDayUTC = (d: Date) => {
+  const x = new Date(d);
+  x.setUTCHours(0, 0, 0, 0);
+  return x;
+};
+
 /**
- * Aging de cartera: agrupa las cuentas por cobrar por convenio.
+ * Cartera = dinero ya cobrado y depositado en cuentas, expuesto a la
+ * devaluación del bolívar mientras espera salir (nómina, gastos, conversión).
  *
- * Supuesto: cada DailyReport lleva una "foto" del saldo en Bs.
- * - Origen = primera fecha en la que apareció el convenio.
- * - Saldo actual = última fecha reportada (foto más reciente).
- * - Pérdida cambiaria = diferencia en $ entre cobrar ese saldo en la fecha
- *   de origen vs cobrarlo hoy (ambos valorizados con el saldo Bs actual).
+ * - Saldo base = ingreso clínica acumulado de los últimos 15 días
+ *   (aproxima lo que aún no ha salido por nómina quincenal).
+ * - Pérdida proyectada = pérdida USD adicional si el saldo se mantiene en Bs
+ *   durante 1, 3, 7 o 15 días más, asumiendo que la devaluación diaria
+ *   continúa al ritmo observado en los últimos 30 días.
+ * - Proyección de tasa = valor estimado del Bs/$ a 7/15/30/45 días, persistido
+ *   diariamente en TasaProyeccion para luego comparar contra la tasa real.
  */
 export default async function CarteraPage() {
-  const cuentas = await prisma.cuentaPorCobrar.findMany({
-    include: {
-      reporte: { select: { fecha: true, tasaCambio: true } },
-    },
-    orderBy: { reporte: { fecha: "asc" } },
-  });
-
-  // Historial reciente de tasas para calcular devaluación diaria compuesta
+  // ── 1. Reportes recientes (60 días, suficiente para ventana de tasa diaria) ──
   const reportesRecientes = await prisma.dailyReport.findMany({
     orderBy: { fecha: "desc" },
     take: 60,
-    select: { fecha: true, tasaCambio: true },
+    select: {
+      id: true,
+      fecha: true,
+      tasaCambio: true,
+      consultas: { select: { porcentajeClinica: true } },
+      servicios: { select: { totalBs: true } },
+      anticipos: { select: { totalBs: true } },
+      cuentasPorCobrar: { select: { totalBs: true } },
+    },
   });
-  const tasaHoy = reportesRecientes[0]?.tasaCambio ?? 0;
-  const fechaHoy = reportesRecientes[0]?.fecha ?? new Date();
 
-  // Tasa diaria compound: usa ventana de ~30 días; si hay menos, usa lo disponible
-  const MS_DIA = 1000 * 60 * 60 * 24;
-  const findTasaNDias = (n: number): { tasa: number; dias: number } => {
-    if (reportesRecientes.length === 0) return { tasa: 0, dias: 0 };
+  if (reportesRecientes.length === 0) {
+    return <CarteraClient empty />;
+  }
+
+  const tasaHoy = reportesRecientes[0].tasaCambio;
+  const fechaHoy = reportesRecientes[0].fecha;
+
+  // ── 2. Tasa de devaluación diaria compound (ventana ~30 días) ──
+  const findTasaNDias = (n: number) => {
     const ref = reportesRecientes[0].fecha.getTime();
     const target = ref - n * MS_DIA;
     for (const r of reportesRecientes) {
       if (r.fecha.getTime() <= target) {
-        const dias = Math.round((ref - r.fecha.getTime()) / MS_DIA);
-        return { tasa: r.tasaCambio, dias };
+        return {
+          tasa: r.tasaCambio,
+          dias: Math.round((ref - r.fecha.getTime()) / MS_DIA),
+        };
       }
     }
-    // No hay dato tan antiguo → usa el más viejo disponible
     const r = reportesRecientes[reportesRecientes.length - 1];
-    const dias = Math.round((ref - r.fecha.getTime()) / MS_DIA);
-    return { tasa: r.tasaCambio, dias };
+    return {
+      tasa: r.tasaCambio,
+      dias: Math.round((ref - r.fecha.getTime()) / MS_DIA),
+    };
   };
+  const { tasa: tasa30dAgo, dias: ventanaBaseDias } = findTasaNDias(30);
+  const tasaDiaria = tasaDiariaCompound(tasa30dAgo, tasaHoy, ventanaBaseDias || 1);
 
-  const { tasa: tasa30dAgo, dias: dias30d } = findTasaNDias(30);
-  const tasaDiaria = tasaDiariaCompound(tasa30dAgo, tasaHoy, dias30d || 1);
-  const ventanaBaseDias = dias30d;
+  // ── 3. Saldo en cuentas: últimos 15 días incluyendo hoy ──
+  const ultimos15 = reportesRecientes.filter(
+    (r) => fechaHoy.getTime() - r.fecha.getTime() <= 14 * MS_DIA
+  );
 
-  // Agrupar por nombreConvenio normalizado
-  const norm = (s: string) => s.trim().toUpperCase();
-  const map = new Map<
-    string,
-    {
-      nombreOriginal: string;
-      primeraFecha: Date;
-      tasaOrigen: number;
-      ultimaFecha: Date;
-      tasaUltima: number;
-      saldoActualBs: number;
-      saldoActualDivisa: number;
-      apariciones: number;
-    }
-  >();
-
-  for (const c of cuentas) {
-    const key = norm(c.nombreConvenio);
-    const fecha = c.reporte.fecha;
-    const tasa = c.reporte.tasaCambio;
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, {
-        nombreOriginal: c.nombreConvenio,
-        primeraFecha: fecha,
-        tasaOrigen: tasa,
-        ultimaFecha: fecha,
-        tasaUltima: tasa,
-        saldoActualBs: c.totalBs,
-        saldoActualDivisa: c.ingresoDivisa,
-        apariciones: 1,
-      });
-    } else {
-      if (fecha < existing.primeraFecha) {
-        existing.primeraFecha = fecha;
-        existing.tasaOrigen = tasa;
-      }
-      if (fecha >= existing.ultimaFecha) {
-        existing.ultimaFecha = fecha;
-        existing.tasaUltima = tasa;
-        existing.saldoActualBs = c.totalBs;
-        existing.saldoActualDivisa = c.ingresoDivisa;
-      }
-      existing.apariciones += 1;
-    }
-  }
-
-  const convenios: ConvenioAging[] = Array.from(map.values())
-    .map((v) => {
-      const diasCartera = Math.max(
-        0,
-        Math.round((fechaHoy.getTime() - v.primeraFecha.getTime()) / MS_DIA)
+  const dias = ultimos15
+    .map((r) => {
+      const consClinicaUsd = r.consultas.reduce(
+        (s, c) => s + c.porcentajeClinica,
+        0
       );
-      const tipo = clasificarConvenio(v.nombreOriginal);
-      const saldoOrigenUsd = v.tasaOrigen > 0 ? v.saldoActualBs / v.tasaOrigen : 0;
-      const saldoActualUsd = tasaHoy > 0 ? v.saldoActualBs / tasaHoy : 0;
-      const perdidaUsd = perdidaCambiariaUsd(v.saldoActualBs, v.tasaOrigen, tasaHoy);
-      const perdidaPct = saldoOrigenUsd > 0 ? (perdidaUsd / saldoOrigenUsd) * 100 : 0;
-
-      // Proyección: pérdida adicional si no se cobra en 30/60/90 días
-      const perdidaProyectada30 = perdidaProyectadaUsd(v.saldoActualBs, tasaHoy, 30, tasaDiaria);
-      const perdidaProyectada60 = perdidaProyectadaUsd(v.saldoActualBs, tasaHoy, 60, tasaDiaria);
-      const perdidaProyectada90 = perdidaProyectadaUsd(v.saldoActualBs, tasaHoy, 90, tasaDiaria);
-
+      const consClinicaBs = consClinicaUsd * r.tasaCambio;
+      const servBs = r.servicios.reduce((s, x) => s + x.totalBs, 0);
+      const antBs = r.anticipos.reduce((s, x) => s + x.totalBs, 0);
+      const cueBs = r.cuentasPorCobrar.reduce((s, x) => s + x.totalBs, 0);
+      const ingresoBs = consClinicaBs + servBs + antBs + cueBs;
+      const ingresoUsdOrigen =
+        consClinicaUsd + (servBs + antBs + cueBs) / r.tasaCambio;
+      const ingresoUsdHoy = tasaHoy > 0 ? ingresoBs / tasaHoy : 0;
+      const perdidaUsd = ingresoUsdOrigen - ingresoUsdHoy;
+      const diasTranscurridos = Math.max(
+        0,
+        Math.round((fechaHoy.getTime() - r.fecha.getTime()) / MS_DIA)
+      );
       return {
-        nombre: v.nombreOriginal,
-        tipo,
-        primeraFecha: v.primeraFecha.toISOString(),
-        ultimaFecha: v.ultimaFecha.toISOString(),
-        diasCartera,
-        tasaOrigen: v.tasaOrigen,
-        tasaHoy,
-        saldoActualBs: v.saldoActualBs,
-        saldoActualDivisa: v.saldoActualDivisa,
-        saldoOrigenUsd,
-        saldoActualUsd,
+        id: r.id,
+        fecha: r.fecha.toISOString(),
+        tasaDia: r.tasaCambio,
+        diasTranscurridos,
+        consClinicaBs,
+        servBs,
+        antBs,
+        cueBs,
+        ingresoBs,
+        ingresoUsdOrigen,
+        ingresoUsdHoy,
         perdidaUsd,
-        perdidaPct,
-        perdidaProyectada30,
-        perdidaProyectada60,
-        perdidaProyectada90,
-        apariciones: v.apariciones,
       };
     })
-    .sort((a, b) => b.perdidaUsd - a.perdidaUsd);
+    .sort(
+      (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+    );
 
-  const proyeccion: ProyeccionData = {
-    tasaDiariaPct: tasaDiaria * 100,
-    ventanaBaseDias,
-    tasaProy30: proyectarTasa(tasaHoy, 30, tasaDiaria),
-    tasaProy60: proyectarTasa(tasaHoy, 60, tasaDiaria),
-    tasaProy90: proyectarTasa(tasaHoy, 90, tasaDiaria),
+  const totales = {
+    saldoBs: dias.reduce((s, d) => s + d.ingresoBs, 0),
+    saldoUsdOrigen: dias.reduce((s, d) => s + d.ingresoUsdOrigen, 0),
+    saldoUsdHoy: dias.reduce((s, d) => s + d.ingresoUsdHoy, 0),
+    perdidaYaUsd: dias.reduce((s, d) => s + d.perdidaUsd, 0),
   };
+
+  // ── 4. Pérdida proyectada sobre el saldo total a 1/3/7/15 días ──
+  const HORIZONTES_PERDIDA = [1, 3, 7, 15];
+  const proyPerdida = HORIZONTES_PERDIDA.map((d) => {
+    const tasaFut = proyectarTasa(tasaHoy, d, tasaDiaria);
+    const perdidaUsd =
+      tasaHoy > 0 && tasaFut > 0
+        ? totales.saldoBs / tasaHoy - totales.saldoBs / tasaFut
+        : 0;
+    return { dias: d, tasaProyectada: tasaFut, perdidaUsd };
+  });
+
+  // ── 5. Proyección de tasa a 7/15/30/45 días + persistencia ──
+  const HORIZONTES_TASA = [7, 15, 30, 45];
+  const fechaProyeccion = startOfDayUTC(fechaHoy);
+
+  // Upsert proyecciones de hoy (idempotente: un upsert por día x horizonte)
+  try {
+    await Promise.all(
+      HORIZONTES_TASA.map((d) => {
+        const fechaObj = new Date(fechaProyeccion.getTime() + d * MS_DIA);
+        const tasaFut = proyectarTasa(tasaHoy, d, tasaDiaria);
+        return prisma.tasaProyeccion.upsert({
+          where: {
+            fechaProyeccion_diasAdelante: {
+              fechaProyeccion,
+              diasAdelante: d,
+            },
+          },
+          create: {
+            fechaProyeccion,
+            diasAdelante: d,
+            fechaObjetivo: fechaObj,
+            tasaHoy,
+            tasaDiariaPct: tasaDiaria,
+            tasaProyectada: tasaFut,
+          },
+          update: {
+            fechaObjetivo: fechaObj,
+            tasaHoy,
+            tasaDiariaPct: tasaDiaria,
+            tasaProyectada: tasaFut,
+          },
+        });
+      })
+    );
+  } catch (e) {
+    console.error("[cartera] upsert TasaProyeccion falló:", e);
+  }
+
+  // ── 6. Backfill: proyecciones cuya fecha objetivo ya llegó pero sin tasa real ──
+  try {
+    const pendientes = await prisma.tasaProyeccion.findMany({
+      where: {
+        tasaRealAlObjetivo: null,
+        fechaObjetivo: { lte: fechaProyeccion },
+      },
+    });
+    for (const p of pendientes) {
+      const objMs = p.fechaObjetivo.getTime();
+      let candidato: { tasaCambio: number; fecha: Date } | null = null;
+      let mejorDelta = Infinity;
+      for (const r of reportesRecientes) {
+        const delta = Math.abs(r.fecha.getTime() - objMs);
+        if (delta < mejorDelta) {
+          mejorDelta = delta;
+          candidato = r;
+        }
+      }
+      if (candidato && mejorDelta <= 5 * MS_DIA) {
+        const tasaReal = candidato.tasaCambio;
+        const dif =
+          p.tasaProyectada > 0
+            ? ((tasaReal - p.tasaProyectada) / p.tasaProyectada) * 100
+            : 0;
+        await prisma.tasaProyeccion.update({
+          where: { id: p.id },
+          data: { tasaRealAlObjetivo: tasaReal, diferenciaPct: dif },
+        });
+      }
+    }
+  } catch (e) {
+    console.error("[cartera] backfill TasaProyeccion falló:", e);
+  }
+
+  // ── 7. Cargar histórico cumplido (esperado vs real) ──
+  const historicoRaw = await prisma.tasaProyeccion.findMany({
+    where: { tasaRealAlObjetivo: { not: null } },
+    orderBy: { fechaObjetivo: "desc" },
+    take: 30,
+  });
 
   return (
     <CarteraClient
-      convenios={convenios}
+      empty={false}
       tasaHoy={tasaHoy}
       fechaHoy={fechaHoy.toISOString()}
-      proyeccion={proyeccion}
+      tasaDiariaPct={tasaDiaria * 100}
+      ventanaBaseDias={ventanaBaseDias}
+      dias={dias}
+      totales={totales}
+      proyPerdida={proyPerdida}
+      proyTasa={HORIZONTES_TASA.map((d) => ({
+        dias: d,
+        tasaProyectada: proyectarTasa(tasaHoy, d, tasaDiaria),
+        fechaObjetivo: new Date(
+          fechaProyeccion.getTime() + d * MS_DIA
+        ).toISOString(),
+      }))}
+      historico={historicoRaw.map((h) => ({
+        id: h.id,
+        fechaProyeccion: h.fechaProyeccion.toISOString(),
+        fechaObjetivo: h.fechaObjetivo.toISOString(),
+        diasAdelante: h.diasAdelante,
+        tasaHoy: h.tasaHoy,
+        tasaProyectada: h.tasaProyectada,
+        tasaReal: h.tasaRealAlObjetivo ?? 0,
+        diferenciaPct: h.diferenciaPct ?? 0,
+      }))}
     />
   );
 }

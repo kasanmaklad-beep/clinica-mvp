@@ -1,153 +1,107 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { fmtUsd, fmtBs, fmtInt } from "@/lib/utils";
+import { fmtUsd, fmtBs } from "@/lib/utils";
 import { fmtPct } from "@/lib/devaluacion";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   Wallet,
-  AlertTriangle,
   TrendingDown,
   Clock,
-  Shield,
-  Stethoscope,
-  Users,
   Calendar,
   Zap,
+  LineChart,
+  History,
+  CheckCircle2,
+  ArrowUpRight,
+  ArrowDownRight,
+  Equal,
 } from "lucide-react";
 
-export interface ConvenioAging {
-  nombre: string;
-  tipo: "SEGURO" | "ANUALIDAD" | "OTRO";
-  primeraFecha: string;
-  ultimaFecha: string;
-  diasCartera: number;
-  tasaOrigen: number;
-  tasaHoy: number;
-  saldoActualBs: number;
-  saldoActualDivisa: number;
-  saldoOrigenUsd: number;
-  saldoActualUsd: number;
+// ───────────── Tipos ─────────────
+export interface DiaSaldo {
+  id: string;
+  fecha: string;
+  tasaDia: number;
+  diasTranscurridos: number;
+  consClinicaBs: number;
+  servBs: number;
+  antBs: number;
+  cueBs: number;
+  ingresoBs: number;
+  ingresoUsdOrigen: number;
+  ingresoUsdHoy: number;
   perdidaUsd: number;
-  perdidaPct: number;
-  perdidaProyectada30: number;
-  perdidaProyectada60: number;
-  perdidaProyectada90: number;
-  apariciones: number;
 }
 
-export interface ProyeccionData {
-  tasaDiariaPct: number;
-  ventanaBaseDias: number;
-  tasaProy30: number;
-  tasaProy60: number;
-  tasaProy90: number;
+export interface ProyPerdida {
+  dias: number;
+  tasaProyectada: number;
+  perdidaUsd: number;
 }
 
-interface Props {
-  convenios: ConvenioAging[];
+export interface ProyTasa {
+  dias: number;
+  tasaProyectada: number;
+  fechaObjetivo: string;
+}
+
+export interface HistoricoComp {
+  id: string;
+  fechaProyeccion: string;
+  fechaObjetivo: string;
+  diasAdelante: number;
+  tasaHoy: number;
+  tasaProyectada: number;
+  tasaReal: number;
+  diferenciaPct: number;
+}
+
+interface PropsEmpty {
+  empty: true;
+}
+interface PropsFull {
+  empty: false;
   tasaHoy: number;
   fechaHoy: string;
-  proyeccion: ProyeccionData;
+  tasaDiariaPct: number;
+  ventanaBaseDias: number;
+  dias: DiaSaldo[];
+  totales: {
+    saldoBs: number;
+    saldoUsdOrigen: number;
+    saldoUsdHoy: number;
+    perdidaYaUsd: number;
+  };
+  proyPerdida: ProyPerdida[];
+  proyTasa: ProyTasa[];
+  historico: HistoricoComp[];
 }
 
-type Filtro = "TODOS" | "SEGURO" | "ANUALIDAD" | "OTRO";
-type OrdenBy = "perdida" | "proy30" | "saldo" | "dias" | "nombre";
+type Props = PropsEmpty | PropsFull;
 
-const BUCKETS = [
-  { label: "0–7 días", min: 0, max: 7, color: "bg-emerald-500" },
-  { label: "8–30 días", min: 8, max: 30, color: "bg-yellow-500" },
-  { label: "31–60 días", min: 31, max: 60, color: "bg-amber-500" },
-  { label: "61–90 días", min: 61, max: 90, color: "bg-orange-500" },
-  { label: "90+ días", min: 91, max: Infinity, color: "bg-red-500" },
-];
-
-export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Props) {
-  const [filtro, setFiltro] = useState<Filtro>("TODOS");
-  const [orden, setOrden] = useState<OrdenBy>("perdida");
-
-  const visibles = useMemo(() => {
-    const filtrados =
-      filtro === "TODOS"
-        ? convenios
-        : convenios.filter((c) => c.tipo === filtro);
-    const sorted = [...filtrados];
-    switch (orden) {
-      case "perdida":
-        sorted.sort((a, b) => b.perdidaUsd - a.perdidaUsd);
-        break;
-      case "proy30":
-        sorted.sort((a, b) => b.perdidaProyectada30 - a.perdidaProyectada30);
-        break;
-      case "saldo":
-        sorted.sort((a, b) => b.saldoActualBs - a.saldoActualBs);
-        break;
-      case "dias":
-        sorted.sort((a, b) => b.diasCartera - a.diasCartera);
-        break;
-      case "nombre":
-        sorted.sort((a, b) => a.nombre.localeCompare(b.nombre));
-        break;
-    }
-    return sorted;
-  }, [convenios, filtro, orden]);
-
-  // KPIs
-  const totalSaldoBs = visibles.reduce((s, c) => s + c.saldoActualBs, 0);
-  const totalSaldoUsd = visibles.reduce((s, c) => s + c.saldoActualUsd, 0);
-  const totalPerdidaUsd = visibles.reduce((s, c) => s + c.perdidaUsd, 0);
-  const totalOrigenUsd = visibles.reduce((s, c) => s + c.saldoOrigenUsd, 0);
-  const perdidaPctTotal = totalOrigenUsd > 0 ? (totalPerdidaUsd / totalOrigenUsd) * 100 : 0;
-
-  // Proyección: pérdida adicional si la cartera no se cobra en 30/60/90 días
-  const totalProy30 = visibles.reduce((s, c) => s + c.perdidaProyectada30, 0);
-  const totalProy60 = visibles.reduce((s, c) => s + c.perdidaProyectada60, 0);
-  const totalProy90 = visibles.reduce((s, c) => s + c.perdidaProyectada90, 0);
-
-  // Conteos por tipo
-  const contadores = useMemo(() => {
-    const c = { TODOS: convenios.length, SEGURO: 0, ANUALIDAD: 0, OTRO: 0 };
-    for (const x of convenios) c[x.tipo] += 1;
-    return c;
-  }, [convenios]);
-
-  // Distribución por bucket de aging (sobre los visibles)
-  const buckets = useMemo(() => {
-    return BUCKETS.map((b) => {
-      const items = visibles.filter(
-        (c) => c.diasCartera >= b.min && c.diasCartera <= b.max
-      );
-      return {
-        ...b,
-        count: items.length,
-        saldoBs: items.reduce((s, c) => s + c.saldoActualBs, 0),
-        saldoUsd: items.reduce((s, c) => s + c.saldoActualUsd, 0),
-        perdidaUsd: items.reduce((s, c) => s + c.perdidaUsd, 0),
-      };
-    });
-  }, [visibles]);
-
-  const totalVisibles = visibles.length;
-
-  if (convenios.length === 0) {
+// ───────────── Componente principal ─────────────
+export function CarteraClient(props: Props) {
+  if (props.empty) {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Cartera</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+            Cartera
+          </h1>
           <p className="text-[var(--muted-foreground)] mt-1 text-sm">
-            Aging y pérdida cambiaria por convenio
+            Saldo en cuentas y exposición a la devaluación
           </p>
         </div>
         <Card>
           <CardContent className="py-12 flex flex-col items-center text-center space-y-3">
             <Wallet className="h-12 w-12 text-[var(--muted-foreground)]" />
-            <div className="font-semibold">No hay cuentas por cobrar registradas</div>
+            <div className="font-semibold">Aún no hay reportes registrados</div>
             <p className="text-sm text-[var(--muted-foreground)] max-w-md">
-              Cuando captures reportes con convenios en cuentas por cobrar, verás
-              aquí el análisis de antigüedad y pérdida por devaluación.
+              Cuando se carguen reportes diarios, aquí verás el saldo en cuentas,
+              su pérdida proyectada y la proyección de la tasa Bs/$.
             </p>
           </CardContent>
         </Card>
@@ -155,16 +109,38 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
     );
   }
 
+  const {
+    tasaHoy,
+    fechaHoy,
+    tasaDiariaPct,
+    ventanaBaseDias,
+    dias,
+    totales,
+    proyPerdida,
+    proyTasa,
+    historico,
+  } = props;
+
+  const anualizada = (Math.pow(1 + tasaDiariaPct / 100, 365) - 1) * 100;
+  const perdidaYaPct =
+    totales.saldoUsdOrigen > 0
+      ? (totales.perdidaYaUsd / totales.saldoUsdOrigen) * 100
+      : 0;
+
   return (
     <div className="space-y-5 pb-10">
       {/* Header */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Cartera</h1>
         <p className="text-[var(--muted-foreground)] mt-1 text-sm">
-          Aging y pérdida cambiaria por convenio · tasa hoy{" "}
-          <strong>{tasaHoy.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> Bs/$
-          {" · "}
-          {format(new Date(fechaHoy), "d 'de' MMMM yyyy", { locale: es })}
+          Dinero en cuentas (últimos 15 días) · tasa hoy{" "}
+          <strong>
+            {tasaHoy.toLocaleString("es-VE", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </strong>{" "}
+          Bs/$ · {format(new Date(fechaHoy), "d 'de' MMMM yyyy", { locale: es })}
         </p>
       </div>
 
@@ -173,12 +149,16 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div className="text-xs text-[var(--muted-foreground)] font-medium">Saldo total</div>
+              <div className="text-xs text-[var(--muted-foreground)] font-medium">
+                Saldo en cuentas
+              </div>
               <Wallet className="h-4 w-4 text-[var(--muted-foreground)]" />
             </div>
-            <div className="text-xl font-bold mt-1 text-amber-600">{fmtBs(totalSaldoBs)}</div>
+            <div className="text-xl font-bold mt-1 text-amber-600">
+              {fmtBs(totales.saldoBs)}
+            </div>
             <div className="text-xs text-[var(--muted-foreground)] mt-0.5">
-              ≈ {fmtUsd(totalSaldoUsd)}
+              ≈ {fmtUsd(totales.saldoUsdHoy)}
             </div>
           </CardContent>
         </Card>
@@ -186,14 +166,16 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
         <Card className="ring-1 ring-red-500/30 bg-red-500/5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div className="text-xs text-[var(--muted-foreground)] font-medium">Pérdida cambiaria</div>
+              <div className="text-xs text-[var(--muted-foreground)] font-medium">
+                Ya perdido
+              </div>
               <TrendingDown className="h-4 w-4 text-red-600" />
             </div>
             <div className="text-xl font-bold mt-1 text-red-600">
-              {fmtUsd(totalPerdidaUsd)}
+              {fmtUsd(totales.perdidaYaUsd)}
             </div>
             <div className="text-xs text-red-600/80 mt-0.5 font-medium">
-              {fmtPct(perdidaPctTotal)} vs valor origen
+              {fmtPct(-perdidaYaPct)} vs entrada
             </div>
           </CardContent>
         </Card>
@@ -201,12 +183,16 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div className="text-xs text-[var(--muted-foreground)] font-medium">Convenios</div>
-              <Users className="h-4 w-4 text-[var(--muted-foreground)]" />
+              <div className="text-xs text-[var(--muted-foreground)] font-medium">
+                Devaluación diaria
+              </div>
+              <LineChart className="h-4 w-4 text-[var(--muted-foreground)]" />
             </div>
-            <div className="text-xl font-bold mt-1">{fmtInt(totalVisibles)}</div>
+            <div className="text-xl font-bold mt-1 text-amber-600">
+              {fmtPct(tasaDiariaPct)}
+            </div>
             <div className="text-xs text-[var(--muted-foreground)] mt-0.5">
-              {filtro === "TODOS" ? "total" : filtro.toLowerCase()}
+              últimos {ventanaBaseDias} días
             </div>
           </CardContent>
         </Card>
@@ -214,247 +200,244 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <div className="text-xs text-[var(--muted-foreground)] font-medium">Días promedio</div>
+              <div className="text-xs text-[var(--muted-foreground)] font-medium">
+                Anualizada
+              </div>
               <Clock className="h-4 w-4 text-[var(--muted-foreground)]" />
             </div>
-            <div className="text-xl font-bold mt-1">
-              {visibles.length > 0
-                ? Math.round(
-                    visibles.reduce((s, c) => s + c.diasCartera, 0) / visibles.length
-                  )
-                : 0}
+            <div className="text-xl font-bold mt-1 text-red-600">
+              {fmtPct(anualizada)}
             </div>
-            <div className="text-xs text-[var(--muted-foreground)] mt-0.5">días en cartera</div>
+            <div className="text-xs text-[var(--muted-foreground)] mt-0.5">
+              proyección compound
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Aging buckets */}
-      <Card>
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
-            <div className="font-semibold text-sm">Distribución por antigüedad</div>
-          </div>
-          <div className="space-y-3">
-            {buckets.map((b) => {
-              const pct = totalVisibles > 0 ? (b.count / totalVisibles) * 100 : 0;
-              return (
-                <div key={b.label}>
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`shrink-0 h-2.5 w-2.5 rounded-full ${b.color}`} />
-                      <span className="font-medium text-sm">{b.label}</span>
-                      <span className="text-xs text-[var(--muted-foreground)]">
-                        {b.count} {b.count === 1 ? "convenio" : "convenios"}
-                      </span>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-sm font-bold">{fmtBs(b.saldoBs)}</div>
-                      <div className="text-xs text-red-500 font-medium">
-                        −{fmtUsd(b.perdidaUsd)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="h-2 bg-[var(--muted)] rounded-full overflow-hidden">
-                    <div className={`h-full ${b.color}`} style={{ width: `${Math.min(100, pct)}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Proyección de pérdida */}
+      {/* Pérdida proyectada sobre saldo */}
       <Card className="bg-gradient-to-br from-red-500/10 via-amber-500/5 to-transparent border-red-500/20">
         <CardContent className="p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[var(--muted-foreground)] font-semibold">
                 <Zap className="h-3.5 w-3.5 text-red-600" />
-                Proyección de pérdida cambiaria
+                Pérdida proyectada sobre el saldo
               </div>
               <div className="text-xs text-[var(--muted-foreground)] mt-1">
-                Pérdida adicional si esta cartera no se cobra, asumiendo devaluación diaria promedio{" "}
-                <strong className="text-red-600">{fmtPct(proyeccion.tasaDiariaPct)}</strong>
-                {" "}(últimos {proyeccion.ventanaBaseDias} días)
-              </div>
-            </div>
-            <div className="text-right text-xs text-[var(--muted-foreground)]">
-              <div className="font-semibold uppercase tracking-wider">Anualizada</div>
-              <div className="text-base font-bold text-red-600">
-                {fmtPct((Math.pow(1 + proyeccion.tasaDiariaPct / 100, 365) - 1) * 100)}
+                Cuánto USD adicional perdería este saldo si se mantiene en Bs.
+                La nómina sale quincenal, así que la ventana relevante es ≤ 15 días.
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <ProyCard
-              dias={30}
-              perdida={totalProy30}
-              tasaFutura={proyeccion.tasaProy30}
-              tasaHoy={tasaHoy}
-            />
-            <ProyCard
-              dias={60}
-              perdida={totalProy60}
-              tasaFutura={proyeccion.tasaProy60}
-              tasaHoy={tasaHoy}
-              severo
-            />
-            <ProyCard
-              dias={90}
-              perdida={totalProy90}
-              tasaFutura={proyeccion.tasaProy90}
-              tasaHoy={tasaHoy}
-              severo
-            />
-          </div>
-
-          <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-[var(--muted-foreground)] flex items-start gap-2">
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              Al total de <strong>{fmtUsd(totalPerdidaUsd)}</strong> ya perdidos por devaluación,
-              se sumarían estas cantidades si no se cobra la cartera a tiempo. Los saldos en Bs
-              se mantienen iguales, pero su valor en $ cae día tras día.
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {proyPerdida.map((p) => (
+              <ProyPerdidaCard
+                key={p.dias}
+                dias={p.dias}
+                perdidaUsd={p.perdidaUsd}
+                tasaFutura={p.tasaProyectada}
+                tasaHoy={tasaHoy}
+                severo={p.dias >= 7}
+              />
+            ))}
           </div>
         </CardContent>
       </Card>
 
-      {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-2">
-        {(["TODOS", "SEGURO", "ANUALIDAD", "OTRO"] as Filtro[]).map((f) => {
-          const active = filtro === f;
-          const Icon = f === "SEGURO" ? Shield : f === "ANUALIDAD" ? Stethoscope : Users;
-          return (
-            <button
-              key={f}
-              onClick={() => setFiltro(f)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                active
-                  ? "bg-[var(--primary)] text-white border-[var(--primary)]"
-                  : "bg-[var(--background)] border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--muted)]"
-              }`}
-            >
-              {f !== "TODOS" && <Icon className="h-3 w-3" />}
-              {f === "TODOS" ? "Todos" : f === "SEGURO" ? "Seguros" : f === "ANUALIDAD" ? "Anualidades" : "Otros"}
-              <span className="opacity-70">({contadores[f]})</span>
-            </button>
-          );
-        })}
-
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-[var(--muted-foreground)]">Ordenar:</span>
-          <select
-            value={orden}
-            onChange={(e) => setOrden(e.target.value as OrdenBy)}
-            className="rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[var(--primary)] h-8"
-          >
-            <option value="perdida">Pérdida $ (mayor)</option>
-            <option value="proy30">Proy. 30d (mayor)</option>
-            <option value="saldo">Saldo Bs (mayor)</option>
-            <option value="dias">Días en cartera</option>
-            <option value="nombre">Nombre A-Z</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Tabla */}
+      {/* Proyección de tasa */}
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[var(--muted-foreground)] font-semibold">
+                <LineChart className="h-3.5 w-3.5 text-[var(--primary)]" />
+                Proyección de tasa Bs/$
+              </div>
+              <div className="text-xs text-[var(--muted-foreground)] mt-1">
+                Valor estimado del bolívar a futuro. 45 días aproxima el plazo
+                típico de pago de los seguros.
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {proyTasa.map((p) => (
+              <ProyTasaCard
+                key={p.dias}
+                dias={p.dias}
+                tasaFutura={p.tasaProyectada}
+                tasaHoy={tasaHoy}
+                fechaObjetivo={p.fechaObjetivo}
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Comparativa esperado vs real */}
+      <Card>
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <History className="h-4 w-4 text-[var(--primary)]" />
+            <div className="font-semibold text-sm">
+              Esperado vs real ({historico.length})
+            </div>
+          </div>
+          {historico.length === 0 ? (
+            <div className="text-xs text-[var(--muted-foreground)] py-4 text-center">
+              Aún no hay proyecciones cumplidas. Aparecerán aquí cuando llegue la
+              fecha objetivo de proyecciones registradas.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[var(--muted)] text-left">
+                  <tr>
+                    <th className="p-2 font-medium">Proyectado el</th>
+                    <th className="p-2 font-medium">Para fecha</th>
+                    <th className="p-2 font-medium text-center">Plazo</th>
+                    <th className="p-2 font-medium text-right">Tasa proy.</th>
+                    <th className="p-2 font-medium text-right">Tasa real</th>
+                    <th className="p-2 font-medium text-right">Δ</th>
+                    <th className="p-2 font-medium">Resultado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historico.map((h) => {
+                    const r = clasificarResultado(h.diferenciaPct);
+                    return (
+                      <tr
+                        key={h.id}
+                        className="border-t border-[var(--border)] hover:bg-[var(--muted)]/40"
+                      >
+                        <td className="p-2 text-xs">
+                          {format(new Date(h.fechaProyeccion), "dd MMM yy", {
+                            locale: es,
+                          })}
+                        </td>
+                        <td className="p-2 text-xs">
+                          {format(new Date(h.fechaObjetivo), "dd MMM yy", {
+                            locale: es,
+                          })}
+                        </td>
+                        <td className="p-2 text-xs text-center text-[var(--muted-foreground)]">
+                          {h.diasAdelante}d
+                        </td>
+                        <td className="p-2 text-right text-xs">
+                          {h.tasaProyectada.toLocaleString("es-VE", {
+                            maximumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td className="p-2 text-right text-xs font-medium">
+                          {h.tasaReal.toLocaleString("es-VE", {
+                            maximumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td
+                          className={`p-2 text-right text-xs font-semibold ${r.color}`}
+                        >
+                          {fmtPct(h.diferenciaPct)}
+                        </td>
+                        <td className="p-2">
+                          <Badge tone={r.tone}>
+                            <r.Icon className="h-3 w-3" />
+                            {r.label}
+                          </Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Detalle día a día */}
+      <Card>
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Calendar className="h-4 w-4 text-[var(--primary)]" />
+            <div className="font-semibold text-sm">
+              Detalle por día — últimos 15
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[var(--muted)] text-left sticky top-0">
+              <thead className="bg-[var(--muted)] text-left">
                 <tr>
-                  <th className="p-3 font-medium">Convenio</th>
-                  <th className="p-3 font-medium">Tipo</th>
-                  <th className="p-3 font-medium text-right">Días</th>
-                  <th className="p-3 font-medium text-right">Saldo Bs</th>
-                  <th className="p-3 font-medium text-right">Valor origen $</th>
-                  <th className="p-3 font-medium text-right">Valor hoy $</th>
-                  <th className="p-3 font-medium text-right">Pérdida $</th>
-                  <th className="p-3 font-medium text-right">Proy. 30d</th>
-                  <th className="p-3 font-medium text-right">%</th>
+                  <th className="p-2 font-medium">Fecha</th>
+                  <th className="p-2 font-medium text-right">Días</th>
+                  <th className="p-2 font-medium text-right">Tasa día</th>
+                  <th className="p-2 font-medium text-right">Ingreso Bs</th>
+                  <th className="p-2 font-medium text-right">Valor entrada $</th>
+                  <th className="p-2 font-medium text-right">Valor hoy $</th>
+                  <th className="p-2 font-medium text-right">Pérdida $</th>
                 </tr>
               </thead>
               <tbody>
-                {visibles.map((c) => (
-                  <tr key={c.nombre} className="border-t border-[var(--border)] hover:bg-[var(--muted)]/40">
-                    <td className="p-3">
-                      <div className="font-medium">{c.nombre}</div>
-                      <div className="text-xs text-[var(--muted-foreground)]">
-                        Origen: {format(new Date(c.primeraFecha), "dd MMM yy", { locale: es })}
-                        {" · "}tasa {c.tasaOrigen.toFixed(2)}
-                      </div>
+                {dias.map((d) => (
+                  <tr
+                    key={d.id}
+                    className="border-t border-[var(--border)] hover:bg-[var(--muted)]/40"
+                  >
+                    <td className="p-2 text-xs capitalize">
+                      {format(new Date(d.fecha), "EEE dd MMM", { locale: es })}
                     </td>
-                    <td className="p-3">
-                      <Badge
-                        tone={
-                          c.tipo === "SEGURO" ? "success" : c.tipo === "ANUALIDAD" ? "warning" : "default"
-                        }
-                      >
-                        {c.tipo === "SEGURO"
-                          ? "Seguro"
-                          : c.tipo === "ANUALIDAD"
-                          ? "Anualidad"
-                          : "Otro"}
-                      </Badge>
+                    <td className="p-2 text-right text-xs text-[var(--muted-foreground)]">
+                      {d.diasTranscurridos}
                     </td>
-                    <td className="p-3 text-right">
-                      <span
-                        className={`font-semibold ${
-                          c.diasCartera > 60
-                            ? "text-red-500"
-                            : c.diasCartera > 30
-                            ? "text-amber-600"
-                            : c.diasCartera > 7
-                            ? "text-yellow-600"
-                            : "text-emerald-600"
-                        }`}
-                      >
-                        {c.diasCartera}
-                      </span>
+                    <td className="p-2 text-right text-xs text-[var(--muted-foreground)]">
+                      {d.tasaDia.toLocaleString("es-VE", {
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
-                    <td className="p-3 text-right text-xs">{fmtBs(c.saldoActualBs)}</td>
-                    <td className="p-3 text-right text-xs text-[var(--muted-foreground)]">
-                      {fmtUsd(c.saldoOrigenUsd)}
+                    <td className="p-2 text-right text-xs">
+                      {fmtBs(d.ingresoBs)}
                     </td>
-                    <td className="p-3 text-right text-amber-600 font-medium">
-                      {fmtUsd(c.saldoActualUsd)}
+                    <td className="p-2 text-right text-xs text-[var(--muted-foreground)]">
+                      {fmtUsd(d.ingresoUsdOrigen)}
                     </td>
-                    <td className="p-3 text-right text-red-600 font-bold">
-                      −{fmtUsd(c.perdidaUsd)}
+                    <td className="p-2 text-right text-xs text-amber-600 font-medium">
+                      {fmtUsd(d.ingresoUsdHoy)}
                     </td>
-                    <td className="p-3 text-right text-red-500 text-xs font-semibold">
-                      −{fmtUsd(c.perdidaProyectada30)}
-                    </td>
-                    <td className="p-3 text-right text-red-600 text-xs font-semibold">
-                      {fmtPct(-c.perdidaPct)}
+                    <td className="p-2 text-right text-xs text-red-600 font-semibold">
+                      −{fmtUsd(d.perdidaUsd)}
                     </td>
                   </tr>
                 ))}
-                {visibles.length === 0 && (
+                {dias.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="p-6 text-center text-sm text-[var(--muted-foreground)]">
-                      No hay convenios con este filtro.
+                    <td
+                      colSpan={7}
+                      className="p-6 text-center text-sm text-[var(--muted-foreground)]"
+                    >
+                      No hay reportes en los últimos 15 días.
                     </td>
                   </tr>
                 )}
               </tbody>
-              {visibles.length > 0 && (
+              {dias.length > 0 && (
                 <tfoot className="bg-[var(--muted)] font-semibold text-sm">
                   <tr className="border-t-2">
-                    <td className="p-3" colSpan={3}>
-                      Totales · {visibles.length} convenios
+                    <td className="p-2" colSpan={3}>
+                      Totales · {dias.length} días
                     </td>
-                    <td className="p-3 text-right text-xs">{fmtBs(totalSaldoBs)}</td>
-                    <td className="p-3 text-right text-xs">{fmtUsd(totalOrigenUsd)}</td>
-                    <td className="p-3 text-right text-amber-600">{fmtUsd(totalSaldoUsd)}</td>
-                    <td className="p-3 text-right text-red-600">−{fmtUsd(totalPerdidaUsd)}</td>
-                    <td className="p-3 text-right text-red-500 text-xs">−{fmtUsd(totalProy30)}</td>
-                    <td className="p-3 text-right text-red-600 text-xs">{fmtPct(-perdidaPctTotal)}</td>
+                    <td className="p-2 text-right text-xs">
+                      {fmtBs(totales.saldoBs)}
+                    </td>
+                    <td className="p-2 text-right text-xs">
+                      {fmtUsd(totales.saldoUsdOrigen)}
+                    </td>
+                    <td className="p-2 text-right text-amber-600">
+                      {fmtUsd(totales.saldoUsdHoy)}
+                    </td>
+                    <td className="p-2 text-right text-red-600">
+                      −{fmtUsd(totales.perdidaYaUsd)}
+                    </td>
                   </tr>
                 </tfoot>
               )}
@@ -463,26 +446,28 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
         </CardContent>
       </Card>
 
-      {/* Nota metodológica */}
+      {/* Notas */}
       <Card className="bg-[var(--muted)]/30 border-dashed">
         <CardContent className="p-4 text-xs text-[var(--muted-foreground)] space-y-1">
           <div className="font-semibold text-[var(--foreground)]">Notas</div>
           <p>
-            · <strong>Valor origen $</strong>: lo que valía el saldo actual en Bs el
-            día que el convenio apareció por primera vez (con la tasa de ese día).
+            · <strong>Saldo en cuentas</strong>: ingreso clínica acumulado de los
+            últimos 15 días. Aproxima el dinero que aún no ha salido por nómina
+            quincenal u otros gastos.
           </p>
           <p>
-            · <strong>Pérdida $</strong>: diferencia entre el valor origen y el
-            valor hoy, causada por la devaluación del Bolívar.
+            · <strong>Valor entrada $</strong>: lo que valía cada ingreso el día
+            que entró, con la tasa de ese día.
           </p>
           <p>
-            · <strong>Proyección</strong>: asume que la devaluación continúa al
-            ritmo diario observado en los últimos {proyeccion.ventanaBaseDias} días.
-            Es un escenario, no una predicción.
+            · <strong>Pérdida proyectada</strong>: asume que la devaluación
+            continúa al ritmo diario observado en los últimos {ventanaBaseDias}{" "}
+            días. Es un escenario, no una predicción.
           </p>
           <p>
-            · <strong>Clasificación</strong>: automática por nombre. Seguros se
-            detectan por palabras clave; Anualidad por &ldquo;Dr./Dra./ANUALIDAD&rdquo;.
+            · <strong>Esperado vs real</strong>: cada día se persiste la
+            proyección a 7/15/30/45 días. Cuando llega la fecha objetivo se
+            compara contra la tasa real de ese día.
           </p>
         </CardContent>
       </Card>
@@ -490,18 +475,16 @@ export function CarteraClient({ convenios, tasaHoy, fechaHoy, proyeccion }: Prop
   );
 }
 
-// ══════════════════════════════════════════════════════════════
-// ProyCard — tarjeta de proyección por horizonte de días
-// ══════════════════════════════════════════════════════════════
-function ProyCard({
+// ───────────── Subcomponentes ─────────────
+function ProyPerdidaCard({
   dias,
-  perdida,
+  perdidaUsd,
   tasaFutura,
   tasaHoy,
   severo,
 }: {
   dias: number;
-  perdida: number;
+  perdidaUsd: number;
   tasaFutura: number;
   tasaHoy: number;
   severo?: boolean;
@@ -513,15 +496,82 @@ function ProyCard({
     <div className={`rounded-lg border border-[var(--border)] ${bg} p-3`}>
       <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] font-semibold uppercase tracking-wider">
         <Calendar className="h-3 w-3" />
-        {dias} días
+        {dias} {dias === 1 ? "día" : "días"}
       </div>
       <div className={`text-xl sm:text-2xl font-black mt-1 ${color}`}>
-        −{fmtUsd(perdida)}
+        −{fmtUsd(perdidaUsd)}
       </div>
       <div className="text-[10px] text-[var(--muted-foreground)] mt-1 leading-tight">
-        Tasa proy: <strong>{tasaFutura.toLocaleString("es-VE", { maximumFractionDigits: 0 })}</strong>
-        {" "}({fmtPct(variacion)})
+        Tasa proy:{" "}
+        <strong>
+          {tasaFutura.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
+        </strong>{" "}
+        ({fmtPct(variacion)})
       </div>
     </div>
   );
+}
+
+function ProyTasaCard({
+  dias,
+  tasaFutura,
+  tasaHoy,
+  fechaObjetivo,
+}: {
+  dias: number;
+  tasaFutura: number;
+  tasaHoy: number;
+  fechaObjetivo: string;
+}) {
+  const variacion = tasaHoy > 0 ? ((tasaFutura - tasaHoy) / tasaHoy) * 100 : 0;
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 p-3">
+      <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] font-semibold uppercase tracking-wider">
+        <Calendar className="h-3 w-3" />
+        {dias} días
+      </div>
+      <div className="text-xl sm:text-2xl font-black mt-1 text-[var(--foreground)]">
+        {tasaFutura.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
+      </div>
+      <div className="text-[10px] text-[var(--muted-foreground)] mt-1 leading-tight">
+        {format(new Date(fechaObjetivo), "dd MMM yy", { locale: es })} ·{" "}
+        <span className="text-red-500 font-semibold">{fmtPct(variacion)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ───────────── Helpers ─────────────
+type ResultadoBadge = {
+  label: string;
+  tone: "success" | "warning" | "danger" | "default";
+  Icon: typeof CheckCircle2;
+  color: string;
+};
+
+function clasificarResultado(diferenciaPct: number): ResultadoBadge {
+  // diferenciaPct positivo = tasa real más alta que proyectada → MÁS devaluación que esperada (peor para el clínica)
+  // diferenciaPct negativo = tasa real más baja que proyectada → MENOS devaluación (mejor)
+  if (diferenciaPct > 1) {
+    return {
+      label: "Peor de lo esperado",
+      tone: "danger",
+      Icon: ArrowUpRight,
+      color: "text-red-600",
+    };
+  }
+  if (diferenciaPct < -1) {
+    return {
+      label: "Mejor de lo esperado",
+      tone: "success",
+      Icon: ArrowDownRight,
+      color: "text-emerald-600",
+    };
+  }
+  return {
+    label: "Cumplió",
+    tone: "default",
+    Icon: Equal,
+    color: "text-[var(--muted-foreground)]",
+  };
 }

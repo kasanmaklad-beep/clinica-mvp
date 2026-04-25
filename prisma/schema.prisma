@@ -169,3 +169,24 @@ model APS {
   noFacturadosComentarios String?
   facturadosComentarios   String?
 }
+
+// =========== PROYECCIONES DE TASA ===========
+// Persistencia diaria de las proyecciones de tasa Bs/$ a varios horizontes (7/15/30/45)
+// para luego comparar contra la tasa real cuando llegue la fecha objetivo.
+// Cada (fechaProyeccion, diasAdelante) es único — un upsert al día.
+model TasaProyeccion {
+  id                 String    @id @default(cuid())
+  fechaProyeccion    DateTime  // día en que se hizo la proyección (00:00 UTC)
+  diasAdelante       Int       // 7, 15, 30, 45
+  fechaObjetivo      DateTime  // = fechaProyeccion + diasAdelante (00:00 UTC)
+  tasaHoy            Float     // tasa del día en que se hizo la proyección
+  tasaDiariaPct      Float     // ritmo diario observado (decimal, ej. 0.006 = 0.6%/día)
+  tasaProyectada     Float     // tasaHoy * (1 + tasaDiariaPct)^diasAdelante
+  tasaRealAlObjetivo Float?    // se llena cuando llega fechaObjetivo
+  diferenciaPct      Float?    // (tasaReal - tasaProy) / tasaProy * 100 — positivo = más devaluación que esperada
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([fechaProyeccion, diasAdelante])
+  @@index([fechaObjetivo])
+}
