@@ -1,8 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canEditReports } from "@/lib/roles";
-import { DashboardClient, ReporteDashboard, DayData, MonthData, TopEspecialidad, DevaluacionData } from "./dashboard-client";
-import { devaluacionPct } from "@/lib/devaluacion";
+import { DashboardClient, ReporteDashboard, DayData, MonthData, TopEspecialidad, TasaTimelinePoint } from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
 
@@ -29,13 +28,13 @@ async function cargarReporte(id: string): Promise<ReporteDashboard | null> {
     creadoPor: r.creadoPor?.name ?? "—",
     consultas: r.consultas
       .filter(c => c.numPacientes > 0 || c.totalBs > 0 || c.ingresoDivisa > 0)
-      .map(c => ({ especialidad: c.especialidad.nombre, numPacientes: c.numPacientes, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, porcentajeClinica: c.porcentajeClinica })),
+      .map(c => ({ especialidad: c.especialidad.nombre, numPacientes: c.numPacientes, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd, porcentajeClinica: c.porcentajeClinica })),
     servicios: r.servicios
       .filter(s => s.numPacientes > 0 || s.totalBs > 0 || s.ingresoDivisa > 0)
-      .map(s => ({ unidad: s.unidadServicio.nombre, categoria: s.unidadServicio.categoria, numPacientes: s.numPacientes, totalBs: s.totalBs, ingresoDivisa: s.ingresoDivisa })),
+      .map(s => ({ unidad: s.unidadServicio.nombre, categoria: s.unidadServicio.categoria, numPacientes: s.numPacientes, totalBs: s.totalBs, ingresoDivisa: s.ingresoDivisa, efectivoUsd: s.efectivoUsd })),
     pacientesArea: r.pacientesArea.map(p => ({ area: p.area, numPacientes: p.numPacientes })),
-    anticipos: r.anticipos.map(a => ({ tipo: a.tipo, pacienteNombre: a.pacienteNombre ?? "", totalBs: a.totalBs, ingresoDivisa: a.ingresoDivisa, estado: a.estado })),
-    cuentasPorCobrar: r.cuentasPorCobrar.map(c => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, numPacientes: c.numPacientes, comentarios: c.comentarios })),
+    anticipos: r.anticipos.map(a => ({ tipo: a.tipo, pacienteNombre: a.pacienteNombre ?? "", totalBs: a.totalBs, ingresoDivisa: a.ingresoDivisa, efectivoUsd: a.efectivoUsd, estado: a.estado })),
+    cuentasPorCobrar: r.cuentasPorCobrar.map(c => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd, numPacientes: c.numPacientes, comentarios: c.comentarios })),
     aps: r.aps ? { consultas: r.aps.consultas, laboratoriosImagenes: r.aps.laboratoriosImagenes, movimientosDia: r.aps.movimientosDia, totalFacturados: r.aps.totalFacturados } : null,
   };
 }
@@ -211,33 +210,13 @@ export default async function DashboardPage() {
       .slice(0, 5);
   }
 
-  // ─── Devaluación: últimas tasas (hoy, ayer, 7d, 30d) ───────────────────────
-  // allReports está ordenado desc (más reciente primero)
-  const tasaHoy = allReports[0]?.tasaCambio ?? 0;
-  const tasaAyer = allReports[1]?.tasaCambio ?? 0;
-  // Buscar tasa ~7 días atrás y ~30 días atrás
-  const findTasaNDias = (n: number): number => {
-    if (allReports.length === 0) return 0;
-    const ref = allReports[0].fecha.getTime();
-    const target = ref - n * 24 * 60 * 60 * 1000;
-    // primer reporte cuya fecha <= target
-    for (const r of allReports) {
-      if (r.fecha.getTime() <= target) return r.tasaCambio;
-    }
-    return allReports[allReports.length - 1].tasaCambio;
-  };
-  const tasa7d = findTasaNDias(7);
-  const tasa30d = findTasaNDias(30);
-
-  const devaluacion: DevaluacionData = {
-    tasa: tasaHoy,
-    diaPct: devaluacionPct(tasaAyer, tasaHoy),
-    semanaPct: devaluacionPct(tasa7d, tasaHoy),
-    mesPct: devaluacionPct(tasa30d, tasaHoy),
-    tasaAyer,
-    fechaHoy: allReports[0]?.fecha.toISOString() ?? null,
-    fechaAyer: allReports[1]?.fecha.toISOString() ?? null,
-  };
+  // ─── Línea de tiempo de tasas (desc, más reciente primero) ────────────────
+  // El cliente calcula la devaluación relativa al reporte seleccionado en la
+  // navegación, no a un punto fijo en el tiempo.
+  const tasaTimeline: TasaTimelinePoint[] = allReports.map(r => ({
+    fechaIso: r.fecha.toISOString(),
+    tasa: r.tasaCambio,
+  }));
 
   const initialReporte = reportesLista.length > 0 ? await cargarReporte(reportesLista[0].id) : null;
 
@@ -249,7 +228,7 @@ export default async function DashboardPage() {
       chartData={chartData}
       months={months}
       allTopEspecialidades={allTopEspecialidades}
-      devaluacion={devaluacion}
+      tasaTimeline={tasaTimeline}
     />
   );
 }

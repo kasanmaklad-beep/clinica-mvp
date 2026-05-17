@@ -49,6 +49,7 @@ export default async function EditarReportePage({ params }: Params) {
       numPacientes: s?.numPacientes ?? 0,
       totalBs: s?.totalBs ?? 0,
       ingresoDivisa: s?.ingresoDivisa ?? 0,
+      efectivoUsd: s?.efectivoUsd ?? 0,
       porcentajeClinica: s?.porcentajeClinica ?? 0,
     };
   });
@@ -60,6 +61,7 @@ export default async function EditarReportePage({ params }: Params) {
       numPacientes: s?.numPacientes ?? 0,
       totalBs: s?.totalBs ?? 0,
       ingresoDivisa: s?.ingresoDivisa ?? 0,
+      efectivoUsd: s?.efectivoUsd ?? 0,
       porcentajeClinica: 0,
     };
   });
@@ -73,6 +75,7 @@ export default async function EditarReportePage({ params }: Params) {
     tipo: a.tipo as "HOSPITALIZACION" | "EMERGENCIA" | "ESTUDIOS",
     totalBs: a.totalBs,
     ingresoDivisa: a.ingresoDivisa,
+    efectivoUsd: a.efectivoUsd,
     numPacientes: a.numPacientes,
     pacienteNombre: a.pacienteNombre ?? "",
     estado: a.estado as "PENDIENTE" | "APLICADO",
@@ -84,6 +87,7 @@ export default async function EditarReportePage({ params }: Params) {
     nombreConvenio: c.nombreConvenio,
     totalBs: c.totalBs,
     ingresoDivisa: c.ingresoDivisa,
+    efectivoUsd: c.efectivoUsd,
     numPacientes: c.numPacientes,
     comentarios: c.comentarios ?? "",
     aseguradoraId: c.aseguradoraId ?? "",

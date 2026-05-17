@@ -6,6 +6,7 @@ import { z } from "zod";
 const lineaConsultaSchema = z.object({
   especialidadId: z.string(),
   ingresoDivisa: z.number().min(0).default(0),
+  efectivoUsd: z.number().min(0).default(0),
   totalBs: z.number().min(0).default(0),
   numPacientes: z.number().int().min(0).default(0),
   porcentajeClinica: z.number().min(0).default(0),
@@ -15,6 +16,7 @@ const lineaConsultaSchema = z.object({
 const lineaServicioSchema = z.object({
   unidadServicioId: z.string(),
   ingresoDivisa: z.number().min(0).default(0),
+  efectivoUsd: z.number().min(0).default(0),
   totalBs: z.number().min(0).default(0),
   numPacientes: z.number().int().min(0).default(0),
   porcentajeClinica: z.number().min(0).default(0),
@@ -30,6 +32,7 @@ const pacienteAreaSchema = z.object({
 const anticipoSchema = z.object({
   tipo: z.enum(["HOSPITALIZACION", "EMERGENCIA", "ESTUDIOS"]),
   ingresoDivisa: z.number().min(0).default(0),
+  efectivoUsd: z.number().min(0).default(0),
   totalBs: z.number().min(0).default(0),
   numPacientes: z.number().int().min(0).default(1),
   pacienteNombre: z.string().optional(),
@@ -41,6 +44,7 @@ const anticipoSchema = z.object({
 const cuentaSchema = z.object({
   nombreConvenio: z.string().min(1),
   ingresoDivisa: z.number().min(0).default(0),
+  efectivoUsd: z.number().min(0).default(0),
   totalBs: z.number().min(0).default(0),
   numPacientes: z.number().int().min(0).default(0),
   comentarios: z.string().optional(),
@@ -137,10 +141,10 @@ export async function POST(req: Request) {
       cerradoAt: estado === "CERRADO" ? new Date() : null,
       creadoPorId: userId,
       consultas: {
-        create: consultas.filter(c => c.numPacientes > 0 || c.totalBs > 0 || c.ingresoDivisa > 0),
+        create: consultas.filter(c => c.numPacientes > 0 || c.totalBs > 0 || c.ingresoDivisa > 0 || c.efectivoUsd > 0),
       },
       servicios: {
-        create: servicios.filter(s => s.numPacientes > 0 || s.totalBs > 0 || s.ingresoDivisa > 0),
+        create: servicios.filter(s => s.numPacientes > 0 || s.totalBs > 0 || s.ingresoDivisa > 0 || s.efectivoUsd > 0),
       },
       pacientesArea: {
         create: pacientesArea.filter(p => p.numPacientes > 0),

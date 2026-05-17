@@ -1,19 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { fmtUsd, fmtBs, fmtInt } from "@/lib/utils";
-import { fmtPct } from "@/lib/devaluacion";
+import { fmtPct, devaluacionPct } from "@/lib/devaluacion";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
 } from "recharts";
 import {
-  ChevronLeft, ChevronRight, ClipboardList, Users, DollarSign, Percent,
+  ChevronLeft, ChevronRight, ChevronLast, ClipboardList, Users, DollarSign, Percent,
   ChevronDown, Stethoscope, FlaskConical, HandCoins, Activity, BedDouble, FileText,
   TrendingUp, TrendingDown, Minus, Sparkles, Trophy, Calendar, FileDown,
   AlertTriangle,
@@ -76,6 +76,67 @@ export interface DevaluacionData {
   fechaAyer: string | null;
 }
 
+export interface TasaTimelinePoint {
+  fechaIso: string; // ISO date string del reporte (UTC midnight)
+  tasa: number;
+}
+
+/**
+ * Calcula la devaluación relativa a una fecha de referencia (típicamente el
+ * reporte que el usuario tiene seleccionado en la navegación). La timeline debe
+ * estar ordenada DESC (más reciente primero).
+ */
+function calcDevaluacion(
+  timeline: TasaTimelinePoint[],
+  fechaRefIso: string | null
+): DevaluacionData {
+  const empty: DevaluacionData = {
+    tasa: 0,
+    tasaAyer: 0,
+    diaPct: 0,
+    semanaPct: 0,
+    mesPct: 0,
+    fechaHoy: null,
+    fechaAyer: null,
+  };
+  if (!timeline.length || !fechaRefIso) return empty;
+
+  // Índice del reporte de referencia en la timeline (debe existir si fechaRefIso
+  // viene de reportesLista, pero por seguridad caemos al más reciente).
+  const refIdx = timeline.findIndex(t => t.fechaIso === fechaRefIso);
+  const idx = refIdx >= 0 ? refIdx : 0;
+  const ref = timeline[idx];
+  const prev = timeline[idx + 1]; // siguiente en la timeline = anterior en el tiempo
+
+  const tasa = ref.tasa;
+  const tasaAyer = prev?.tasa ?? 0;
+
+  // Buscar la tasa ~N días antes de la fecha de referencia. Tomamos el primer
+  // reporte cuya fecha sea ≤ (fechaRef − N días).
+  const findTasaNDias = (n: number): number => {
+    const refMs = new Date(ref.fechaIso).getTime();
+    const target = refMs - n * 24 * 60 * 60 * 1000;
+    for (let i = idx; i < timeline.length; i++) {
+      if (new Date(timeline[i].fechaIso).getTime() <= target) {
+        return timeline[i].tasa;
+      }
+    }
+    return timeline[timeline.length - 1].tasa;
+  };
+  const tasa7d = findTasaNDias(7);
+  const tasa30d = findTasaNDias(30);
+
+  return {
+    tasa,
+    tasaAyer,
+    diaPct: devaluacionPct(tasaAyer, tasa),
+    semanaPct: devaluacionPct(tasa7d, tasa),
+    mesPct: devaluacionPct(tasa30d, tasa),
+    fechaHoy: ref.fechaIso,
+    fechaAyer: prev?.fechaIso ?? null,
+  };
+}
+
 export interface ReporteDashboard {
   id: string;
   fecha: string;
@@ -83,11 +144,11 @@ export interface ReporteDashboard {
   estado: string;
   observaciones: string | null;
   creadoPor: string;
-  consultas: { especialidad: string; numPacientes: number; totalBs: number; ingresoDivisa: number; porcentajeClinica: number }[];
-  servicios: { unidad: string; categoria: string; numPacientes: number; totalBs: number; ingresoDivisa: number }[];
+  consultas: { especialidad: string; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd: number; porcentajeClinica: number }[];
+  servicios: { unidad: string; categoria: string; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd: number }[];
   pacientesArea: { area: string; numPacientes: number }[];
-  anticipos: { tipo: string; pacienteNombre: string; totalBs: number; ingresoDivisa: number; estado: string }[];
-  cuentasPorCobrar: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; numPacientes: number; comentarios: string | null }[];
+  anticipos: { tipo: string; pacienteNombre: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; estado: string }[];
+  cuentasPorCobrar: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; numPacientes: number; comentarios: string | null }[];
   aps: { consultas: number; laboratoriosImagenes: number; movimientosDia: number; totalFacturados: number } | null;
 }
 
@@ -100,13 +161,22 @@ interface Props {
   chartData: DayData[];
   months: MonthData[];
   allTopEspecialidades: Record<string, TopEspecialidad[]>;
-  devaluacion: DevaluacionData;
+  tasaTimeline: TasaTimelinePoint[];
 }
 
-export function DashboardClient({ reportesLista, initialReporte, canCreate, chartData, months, allTopEspecialidades, devaluacion }: Props) {
+export function DashboardClient({ reportesLista, initialReporte, canCreate, chartData, months, allTopEspecialidades, tasaTimeline }: Props) {
   const [idx, setIdx] = useState(0);
   const [reporte, setReporte] = useState<ReporteDashboard | null>(initialReporte);
   const [loading, setLoading] = useState(false);
+  const datePickerRef = useRef<HTMLInputElement | null>(null);
+
+  // Devaluación relativa al reporte que el usuario tiene visible (no al global).
+  // Cuando navega a un día anterior, la banner se recalcula contra el día previo
+  // a ese, no contra el último reporte global.
+  const devaluacion = useMemo(
+    () => calcDevaluacion(tasaTimeline, reporte?.fecha ?? null),
+    [tasaTimeline, reporte?.fecha]
+  );
 
   async function navegar(nuevoIdx: number) {
     if (nuevoIdx < 0 || nuevoIdx >= reportesLista.length) return;
@@ -125,13 +195,13 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
         creadoPor: r.creadoPor?.name ?? "—",
         consultas: (r.consultas || [])
           .filter((c: { numPacientes: number; totalBs: number; ingresoDivisa: number }) => c.numPacientes > 0 || c.totalBs > 0 || c.ingresoDivisa > 0)
-          .map((c: { especialidad: { nombre: string }; numPacientes: number; totalBs: number; ingresoDivisa: number; porcentajeClinica: number }) => ({ especialidad: c.especialidad.nombre, numPacientes: c.numPacientes, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, porcentajeClinica: c.porcentajeClinica })),
+          .map((c: { especialidad: { nombre: string }; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd?: number; porcentajeClinica: number }) => ({ especialidad: c.especialidad.nombre, numPacientes: c.numPacientes, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd ?? 0, porcentajeClinica: c.porcentajeClinica })),
         servicios: (r.servicios || [])
           .filter((s: { numPacientes: number; totalBs: number; ingresoDivisa: number }) => s.numPacientes > 0 || s.totalBs > 0 || s.ingresoDivisa > 0)
-          .map((s: { unidadServicio: { nombre: string; categoria: string }; numPacientes: number; totalBs: number; ingresoDivisa: number }) => ({ unidad: s.unidadServicio.nombre, categoria: s.unidadServicio.categoria, numPacientes: s.numPacientes, totalBs: s.totalBs, ingresoDivisa: s.ingresoDivisa })),
+          .map((s: { unidadServicio: { nombre: string; categoria: string }; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd?: number }) => ({ unidad: s.unidadServicio.nombre, categoria: s.unidadServicio.categoria, numPacientes: s.numPacientes, totalBs: s.totalBs, ingresoDivisa: s.ingresoDivisa, efectivoUsd: s.efectivoUsd ?? 0 })),
         pacientesArea: (r.pacientesArea || []).map((p: { area: string; numPacientes: number }) => ({ area: p.area, numPacientes: p.numPacientes })),
-        anticipos: (r.anticipos || []).map((a: { tipo: string; pacienteNombre: string | null; totalBs: number; ingresoDivisa: number; estado: string }) => ({ tipo: a.tipo, pacienteNombre: a.pacienteNombre ?? "", totalBs: a.totalBs, ingresoDivisa: a.ingresoDivisa, estado: a.estado })),
-        cuentasPorCobrar: (r.cuentasPorCobrar || []).map((c: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; numPacientes: number; comentarios: string | null }) => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, numPacientes: c.numPacientes, comentarios: c.comentarios })),
+        anticipos: (r.anticipos || []).map((a: { tipo: string; pacienteNombre: string | null; totalBs: number; ingresoDivisa: number; efectivoUsd?: number; estado: string }) => ({ tipo: a.tipo, pacienteNombre: a.pacienteNombre ?? "", totalBs: a.totalBs, ingresoDivisa: a.ingresoDivisa, efectivoUsd: a.efectivoUsd ?? 0, estado: a.estado })),
+        cuentasPorCobrar: (r.cuentasPorCobrar || []).map((c: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd?: number; numPacientes: number; comentarios: string | null }) => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd ?? 0, numPacientes: c.numPacientes, comentarios: c.comentarios })),
         aps: r.aps ? { consultas: r.aps.consultas, laboratoriosImagenes: r.aps.laboratoriosImagenes, movimientosDia: r.aps.movimientosDia, totalFacturados: r.aps.totalFacturados } : null,
       });
     }
@@ -196,6 +266,16 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
   const totalPac = totConsPac + totServPac + totCuentasPac;
   const totPacArea = reporte.pacientesArea.reduce((s, p) => s + p.numPacientes, 0);
 
+  // Efectivo $ entregado a HCDE — la columna nueva añadida en mayo 2026.
+  // Suma del cash físico recibido por la clínica en todas las secciones.
+  const totConsEfec = reporte.consultas.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
+  const totServEfec = reporte.servicios.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
+  const totAntEfec = reporte.anticipos.reduce((s, a) => s + (a.efectivoUsd || 0), 0);
+  const totCuentasEfec = reporte.cuentasPorCobrar.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
+  const totalEfectivo = totConsEfec + totServEfec + totAntEfec + totCuentasEfec;
+  const totLabEfec = laboratorio.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
+  const totImgEfec = imagenes.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
+
   const haySiguiente = idx > 0;
   const hayAnterior = idx < reportesLista.length - 1;
 
@@ -229,25 +309,81 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
           <h2 className="text-lg sm:text-2xl font-bold capitalize">
             {format(new Date(reporte.fecha), "EEEE d 'de' MMMM yyyy", { locale: es })}
           </h2>
-          <div className="flex items-center justify-center gap-2 mt-1 text-xs text-[var(--muted-foreground)]">
+          <div className="flex items-center justify-center gap-2 mt-1 text-xs text-[var(--muted-foreground)] flex-wrap">
             <Badge tone={reporte.estado === "CERRADO" ? "success" : "warning"}>
               {reporte.estado === "CERRADO" ? "Cerrado" : "Borrador"}
             </Badge>
             <span>Tasa: {reporte.tasaCambio} Bs/$</span>
             <span className="hidden sm:inline">· {reporte.creadoPor}</span>
+            {/* Selector de fecha — salta a cualquier día con reporte */}
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                const el = datePickerRef.current;
+                if (!el) return;
+                // showPicker es estándar moderno; fallback a click() para Safari viejo.
+                if (typeof el.showPicker === "function") el.showPicker();
+                else el.click();
+              }}
+              className="inline-flex items-center gap-1 ml-1 text-[var(--primary)] hover:underline disabled:opacity-50"
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              <span className="text-xs">Saltar a fecha</span>
+            </button>
+            <input
+              ref={datePickerRef}
+              type="date"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+              value={reporte.fecha.slice(0, 10)}
+              min={reportesLista[reportesLista.length - 1].fecha.slice(0, 10)}
+              max={reportesLista[0].fecha.slice(0, 10)}
+              disabled={loading}
+              onChange={(e) => {
+                const target = e.target.value;
+                if (!target) return;
+                // Match exacto, o el reporte cerrado más cercano antes/después
+                const exactIdx = reportesLista.findIndex(
+                  (r) => r.fecha.slice(0, 10) === target
+                );
+                if (exactIdx >= 0) {
+                  if (exactIdx !== idx) navegar(exactIdx);
+                  return;
+                }
+                // No hay reporte exacto en esa fecha (día sin captura) →
+                // buscamos el más cercano en valor absoluto.
+                const targetMs = new Date(target).getTime();
+                let bestIdx = 0;
+                let bestDelta = Infinity;
+                reportesLista.forEach((r, i) => {
+                  const d = Math.abs(new Date(r.fecha).getTime() - targetMs);
+                  if (d < bestDelta) {
+                    bestDelta = d;
+                    bestIdx = i;
+                  }
+                });
+                if (bestIdx !== idx) navegar(bestIdx);
+              }}
+            />
           </div>
         </div>
         <Button variant="outline" size="icon" disabled={!haySiguiente || loading} onClick={() => navegar(idx - 1)} aria-label="Día siguiente">
           <ChevronRight className="h-5 w-5" />
         </Button>
+        <Button variant="outline" size="icon" disabled={idx === 0 || loading} onClick={() => navegar(0)} aria-label="Ir al reporte más reciente" title="Ir al más reciente">
+          <ChevronLast className="h-5 w-5" />
+        </Button>
       </div>
 
       {/* KPIs del día — Ingreso Clínica como métrica principal */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <KpiCard icon={Percent} label="Ingreso Clínica $" value={fmtUsd(totClinica)} accent="text-emerald-600" big />
         <KpiCard icon={DollarSign} label="Ingreso Clínica Bs." value={fmtBs(totClinica * tasa)} sub={`Tasa: ${tasa.toLocaleString()} Bs/$`} accent="text-amber-600" />
         <KpiCard icon={Users} label="Pacientes" value={fmtInt(totalPac)} accent="text-[var(--primary)]" />
         <KpiCard icon={DollarSign} label="Facturado $" value={fmtUsd(totalDivisa)} accent="text-[var(--muted-foreground)]" />
+        <KpiCard icon={HandCoins} label="Efectivo $ → HCDE" value={fmtUsd(totalEfectivo)} sub="Cash físico entregado" accent="text-emerald-600" />
       </div>
 
       {/* Secciones plegables */}
@@ -267,6 +403,7 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
                 <th className="p-2.5 font-medium text-right">Bs.</th>
                 <th className="p-2.5 font-medium text-right">≈ $</th>
                 <th className="p-2.5 font-medium text-right">Div.</th>
+                <th className="p-2.5 font-medium text-right">Efec. $</th>
                 <th className="p-2.5 font-medium text-right">% Clín.</th>
               </tr>
             </thead>
@@ -278,6 +415,7 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
                   <td className="p-2.5 text-right text-xs">{fmtBs(c.totalBs)}</td>
                   <td className="p-2.5 text-right text-amber-600 font-medium">{fmtUsd(bsToUsd(c.totalBs))}</td>
                   <td className="p-2.5 text-right text-sky-600 text-xs">{c.ingresoDivisa > 0 ? fmtUsd(c.ingresoDivisa) : "—"}</td>
+                  <td className="p-2.5 text-right text-emerald-600 text-xs">{(c.efectivoUsd || 0) > 0 ? fmtUsd(c.efectivoUsd) : "—"}</td>
                   <td className="p-2.5 text-right text-emerald-600">{fmtUsd(c.porcentajeClinica)}</td>
                 </tr>
               ))}
@@ -286,6 +424,7 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
                 <td className="p-2.5 text-right text-xs">{fmtBs(totConsBs)}</td>
                 <td className="p-2.5 text-right text-amber-600">{fmtUsd(bsToUsd(totConsBs))}</td>
                 <td className="p-2.5 text-right text-sky-600 text-xs">{totConsDiv > 0 ? fmtUsd(totConsDiv) : "—"}</td>
+                <td className="p-2.5 text-right text-emerald-600 text-xs">{totConsEfec > 0 ? fmtUsd(totConsEfec) : "—"}</td>
                 <td className="p-2.5 text-right text-emerald-600">{fmtUsd(totConsultasClinicaOnly)}</td>
               </tr>
             </tbody>
@@ -835,7 +974,14 @@ function ExecutiveMonthly({
 // DEVALUACIÓN — Banner de pérdida cambiaria
 // ══════════════════════════════════════════════════════════════
 function DevaluacionBanner({ data }: { data: DevaluacionData }) {
-  const { diaPct, semanaPct, mesPct, tasa, tasaAyer } = data;
+  const { diaPct, semanaPct, mesPct, tasa, tasaAyer, fechaHoy, fechaAyer } = data;
+
+  // Etiquetas de fecha reales (no "hoy/ayer") porque el último reporte puede
+  // ser de hace varios días si no se ha cargado uno reciente.
+  const fmtFecha = (iso: string | null) =>
+    iso ? format(new Date(iso), "d MMM", { locale: es }) : "—";
+  const labelHoy = fmtFecha(fechaHoy);
+  const labelAyer = fmtFecha(fechaAyer);
 
   // El Bs pierde valor cuando la tasa sube → devaluacion > 0 es "malo" para saldos en Bs
   const severity =
@@ -882,9 +1028,10 @@ function DevaluacionBanner({ data }: { data: DevaluacionData }) {
                 {fmtPct(diaPct)}
               </div>
               <div className="text-xs text-[var(--muted-foreground)] mt-1">
-                Tasa hoy: <strong>{tasa.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> Bs/$
+                Tasa al <strong>{labelHoy}</strong>:{" "}
+                <strong>{tasa.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> Bs/$
                 {tasaAyer > 0 && (
-                  <> · ayer: <strong>{tasaAyer.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></>
+                  <> · al <strong>{labelAyer}</strong>: <strong>{tasaAyer.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></>
                 )}
               </div>
             </div>
@@ -908,9 +1055,9 @@ function DevaluacionBanner({ data }: { data: DevaluacionData }) {
 
         {ejemplo > 0 && (
           <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-[var(--muted-foreground)] flex items-center gap-2">
-            <span>Ejemplo: Bs 1.000.000 cobrados ayer → perdieron</span>
+            <span>Ejemplo: Bs 1.000.000 cobrados el {labelAyer} → perdieron</span>
             <strong className={colorPrincipal}>{fmtUsd(ejemplo)}</strong>
-            <span>en un día por devaluación.</span>
+            <span>al {labelHoy} por devaluación.</span>
           </div>
         )}
 
@@ -943,11 +1090,12 @@ function KpiCard({ icon: Icon, label, value, sub, accent, big }: { icon: React.C
 }
 
 function ServicioTable({ rows, bsToUsd }: {
-  rows: { unidad: string; numPacientes: number; totalBs: number; ingresoDivisa: number }[];
+  rows: { unidad: string; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd?: number }[];
   bsToUsd: (bs: number) => number;
 }) {
   const totBs = rows.reduce((s, r) => s + r.totalBs, 0);
   const totDiv = rows.reduce((s, r) => s + r.ingresoDivisa, 0);
+  const totEfec = rows.reduce((s, r) => s + (r.efectivoUsd || 0), 0);
   const totPac = rows.reduce((s, r) => s + r.numPacientes, 0);
   return (
     <div className="overflow-x-auto">
@@ -959,6 +1107,7 @@ function ServicioTable({ rows, bsToUsd }: {
             <th className="p-2.5 font-medium text-right">Bs.</th>
             <th className="p-2.5 font-medium text-right">≈ $</th>
             <th className="p-2.5 font-medium text-right">Div.</th>
+            <th className="p-2.5 font-medium text-right">Efec. $</th>
           </tr>
         </thead>
         <tbody>
@@ -969,6 +1118,7 @@ function ServicioTable({ rows, bsToUsd }: {
               <td className="p-2.5 text-right text-xs">{fmtBs(s.totalBs)}</td>
               <td className="p-2.5 text-right text-amber-600 font-medium">{fmtUsd(bsToUsd(s.totalBs))}</td>
               <td className="p-2.5 text-right text-sky-600 text-xs">{s.ingresoDivisa > 0 ? fmtUsd(s.ingresoDivisa) : "—"}</td>
+              <td className="p-2.5 text-right text-emerald-600 text-xs">{(s.efectivoUsd || 0) > 0 ? fmtUsd(s.efectivoUsd!) : "—"}</td>
             </tr>
           ))}
           {rows.length > 1 && (
@@ -977,6 +1127,7 @@ function ServicioTable({ rows, bsToUsd }: {
               <td className="p-2.5 text-right text-xs">{fmtBs(totBs)}</td>
               <td className="p-2.5 text-right text-amber-600">{fmtUsd(bsToUsd(totBs))}</td>
               <td className="p-2.5 text-right text-sky-600 text-xs">{totDiv > 0 ? fmtUsd(totDiv) : "—"}</td>
+              <td className="p-2.5 text-right text-emerald-600 text-xs">{totEfec > 0 ? fmtUsd(totEfec) : "—"}</td>
             </tr>
           )}
         </tbody>

@@ -18,7 +18,8 @@ interface ConsultaRow {
   especialidadId: string;
   numPacientes: number;
   totalBs: number;
-  ingresoDivisa: number;   // USD recibido directamente (ya incluido en totalBs)
+  ingresoDivisa: number;   // Total $ del PDF (incluye efectivo + digital)
+  efectivoUsd: number;     // EFECTIVO $ ENTREGADO A HCDE (porción cash)
   porcentajeClinica: number;
 }
 interface ServicioRow {
@@ -26,6 +27,7 @@ interface ServicioRow {
   numPacientes: number;
   totalBs: number;
   ingresoDivisa: number;
+  efectivoUsd: number;
   porcentajeClinica: number;
 }
 interface PacienteAreaRow { area: "EMERGENCIA" | "HOSPITALIZACION" | "UCI"; numPacientes: number }
@@ -33,6 +35,7 @@ interface AnticipoRow {
   tipo: "HOSPITALIZACION" | "EMERGENCIA" | "ESTUDIOS";
   totalBs: number;
   ingresoDivisa: number;
+  efectivoUsd: number;
   numPacientes: number;
   pacienteNombre: string;
   estado: "PENDIENTE" | "APLICADO";
@@ -43,6 +46,7 @@ interface CuentaRow {
   nombreConvenio: string;
   totalBs: number;
   ingresoDivisa: number;
+  efectivoUsd: number;
   numPacientes: number;
   comentarios: string;
   aseguradoraId: string;
@@ -155,7 +159,7 @@ export function ReporteForm({ especialidades, unidades }: {
 
   // Consultas
   const [consultas, setConsultas] = useState<ConsultaRow[]>(
-    especialidades.map(e => ({ especialidadId: e.id, numPacientes: 0, totalBs: 0, ingresoDivisa: 0, porcentajeClinica: 0 }))
+    especialidades.map(e => ({ especialidadId: e.id, numPacientes: 0, totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, porcentajeClinica: 0 }))
   );
 
   function updateConsulta(idx: number, field: keyof ConsultaRow, val: number) {
@@ -173,7 +177,7 @@ export function ReporteForm({ especialidades, unidades }: {
 
   // Servicios
   const [servicios, setServicios] = useState<ServicioRow[]>(
-    unidades.map(u => ({ unidadServicioId: u.id, numPacientes: 0, totalBs: 0, ingresoDivisa: 0, porcentajeClinica: 0 }))
+    unidades.map(u => ({ unidadServicioId: u.id, numPacientes: 0, totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, porcentajeClinica: 0 }))
   );
 
   function updateServicio(idx: number, field: keyof ServicioRow, val: number) {
@@ -204,16 +208,21 @@ export function ReporteForm({ especialidades, unidades }: {
   // Totales
   const totConsultasBs = consultas.reduce((s, c) => s + c.totalBs, 0);
   const totConsultasDivisa = consultas.reduce((s, c) => s + c.ingresoDivisa, 0);
+  const totConsultasEfec = consultas.reduce((s, c) => s + c.efectivoUsd, 0);
   const totConsultasPac = consultas.reduce((s, c) => s + c.numPacientes, 0);
   const totConsultasClinica = consultas.reduce((s, c) => s + c.porcentajeClinica, 0);
   const totServiciosBs = servicios.reduce((s, c) => s + c.totalBs, 0);
   const totServiciosDivisa = servicios.reduce((s, c) => s + c.ingresoDivisa, 0);
+  const totServiciosEfec = servicios.reduce((s, c) => s + c.efectivoUsd, 0);
   const totServiciosPac = servicios.reduce((s, c) => s + c.numPacientes, 0);
   const totAnticiposBs = anticipos.reduce((s, a) => s + a.totalBs, 0);
   const totAnticiposDivisa = anticipos.reduce((s, a) => s + a.ingresoDivisa, 0);
+  const totAnticiposEfec = anticipos.reduce((s, a) => s + a.efectivoUsd, 0);
   const totCuentasBs = cuentas.reduce((s, c) => s + c.totalBs, 0);
+  const totCuentasEfec = cuentas.reduce((s, c) => s + c.efectivoUsd, 0);
   const totalBs = totConsultasBs + totServiciosBs + totAnticiposBs + totCuentasBs;
   const totalDivisa = totConsultasDivisa + totServiciosDivisa + totAnticiposDivisa;
+  const totalEfectivo = totConsultasEfec + totServiciosEfec + totAnticiposEfec + totCuentasEfec;
   const totalPac = totConsultasPac + totServiciosPac;
 
   async function guardar(estado: "BORRADOR" | "CERRADO") {
@@ -277,11 +286,12 @@ export function ReporteForm({ especialidades, unidades }: {
         badge={totConsultasPac > 0 ? <Badge tone="info">{fmtInt(totConsultasPac)} pac.</Badge> : undefined}>
         <div className="space-y-2">
           {/* Header desktop */}
-          <div className="hidden sm:grid sm:grid-cols-[2.5fr_1fr_1.2fr_1fr_1fr] gap-2 px-1 text-xs text-[var(--muted-foreground)] font-medium">
+          <div className="hidden sm:grid sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr_1fr] gap-2 px-1 text-xs text-[var(--muted-foreground)] font-medium">
             <div>Especialidad</div>
             <div className="text-right">Pacientes</div>
             <div className="text-right">Total Bs.</div>
             <div className="text-right">Divisa ($)</div>
+            <div className="text-right">Efectivo ($)</div>
             <div className="text-right">Ingreso Clínica $</div>
           </div>
 
@@ -294,7 +304,7 @@ export function ReporteForm({ especialidades, unidades }: {
                   {esp.nombre}
                   <span className="ml-2 text-xs text-[var(--muted-foreground)]">hon: ${esp.honorarioClinica}/pac</span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-[2.5fr_1fr_1.2fr_1fr_1fr] gap-2 items-center">
+                <div className="grid grid-cols-2 sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr_1fr] gap-2 items-center">
                   <div className="hidden sm:block text-sm">
                     {esp.nombre}
                     <div className="text-xs text-[var(--muted-foreground)]">${esp.honorarioClinica}/pac</div>
@@ -311,6 +321,10 @@ export function ReporteForm({ especialidades, unidades }: {
                     <Label className="sm:hidden text-xs">Divisa ($)</Label>
                     <NumInput value={row.ingresoDivisa} onChange={v => updateConsulta(idx, "ingresoDivisa", v)} decimal />
                   </div>
+                  <div className="space-y-1">
+                    <Label className="sm:hidden text-xs">Efectivo ($)</Label>
+                    <NumInput value={row.efectivoUsd} onChange={v => updateConsulta(idx, "efectivoUsd", v)} decimal />
+                  </div>
                   <div className="h-9 flex items-center justify-end text-sm font-medium text-[var(--primary)]">
                     {row.porcentajeClinica > 0 ? fmtUsd(row.porcentajeClinica) : "—"}
                   </div>
@@ -319,12 +333,13 @@ export function ReporteForm({ especialidades, unidades }: {
             );
           })}
 
-          <div className="rounded-lg bg-[var(--muted)] p-3 grid grid-cols-2 sm:grid-cols-[2.5fr_1fr_1.2fr_1fr_1fr] gap-2 text-sm font-semibold">
+          <div className="rounded-lg bg-[var(--muted)] p-3 grid grid-cols-2 sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr_1fr] gap-2 text-sm font-semibold">
             <div className="hidden sm:block">Totales</div>
             <div className="col-span-2 sm:hidden">Totales</div>
             <div className="text-right">{fmtInt(totConsultasPac)}</div>
             <div className="text-right">{fmtBs(totConsultasBs)}</div>
             <div className="text-right text-amber-600">{fmtUsd(totConsultasDivisa)}</div>
+            <div className="text-right text-emerald-600">{fmtUsd(totConsultasEfec)}</div>
             <div className="text-right text-[var(--primary)]">{fmtUsd(totConsultasClinica)}</div>
           </div>
         </div>
@@ -335,8 +350,8 @@ export function ReporteForm({ especialidades, unidades }: {
         subtitle={`${fmtInt(totServiciosPac)} pacientes · ${fmtBs(totServiciosBs)}`}
         badge={totServiciosPac > 0 ? <Badge tone="success">{fmtInt(totServiciosPac)} pac.</Badge> : undefined}>
         <div className="space-y-2">
-          <div className="hidden sm:grid sm:grid-cols-[2.5fr_1fr_1.2fr_1fr] gap-2 px-1 text-xs text-[var(--muted-foreground)] font-medium">
-            <div>Unidad</div><div className="text-right">Pacientes</div><div className="text-right">Total Bs.</div><div className="text-right">Divisa ($)</div>
+          <div className="hidden sm:grid sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr] gap-2 px-1 text-xs text-[var(--muted-foreground)] font-medium">
+            <div>Unidad</div><div className="text-right">Pacientes</div><div className="text-right">Total Bs.</div><div className="text-right">Divisa ($)</div><div className="text-right">Efectivo ($)</div>
           </div>
           {unidades.map((uni, idx) => {
             const row = servicios[idx];
@@ -344,7 +359,7 @@ export function ReporteForm({ especialidades, unidades }: {
             return (
               <div key={uni.id} className={`rounded-lg border p-3 ${hasData ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/50 dark:bg-emerald-950/20" : "border-[var(--border)]"}`}>
                 <div className="sm:hidden text-sm font-medium mb-2">{uni.nombre}</div>
-                <div className="grid grid-cols-2 sm:grid-cols-[2.5fr_1fr_1.2fr_1fr] gap-2 items-center">
+                <div className="grid grid-cols-2 sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr] gap-2 items-center">
                   <div className="hidden sm:block text-sm">{uni.nombre}</div>
                   <div className="space-y-1"><Label className="sm:hidden text-xs">Pacientes</Label><NumInput value={row.numPacientes} onChange={v => updateServicio(idx, "numPacientes", v)} /></div>
                   <div className="space-y-1"><Label className="sm:hidden text-xs">Total Bs.</Label><NumInput value={row.totalBs} onChange={v => updateServicio(idx, "totalBs", v)} decimal /></div>
@@ -352,16 +367,21 @@ export function ReporteForm({ especialidades, unidades }: {
                     <Label className="sm:hidden text-xs">Divisa ($)</Label>
                     <NumInput value={row.ingresoDivisa} onChange={v => updateServicio(idx, "ingresoDivisa", v)} decimal />
                   </div>
+                  <div className="space-y-1">
+                    <Label className="sm:hidden text-xs">Efectivo ($)</Label>
+                    <NumInput value={row.efectivoUsd} onChange={v => updateServicio(idx, "efectivoUsd", v)} decimal />
+                  </div>
                 </div>
               </div>
             );
           })}
-          <div className="rounded-lg bg-[var(--muted)] p-3 grid grid-cols-2 sm:grid-cols-[2.5fr_1fr_1.2fr_1fr] gap-2 text-sm font-semibold">
+          <div className="rounded-lg bg-[var(--muted)] p-3 grid grid-cols-2 sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr] gap-2 text-sm font-semibold">
             <div className="hidden sm:block">Totales</div>
             <div className="col-span-2 sm:hidden">Totales</div>
             <div className="text-right">{fmtInt(totServiciosPac)}</div>
             <div className="text-right">{fmtBs(totServiciosBs)}</div>
             <div className="text-right text-amber-600">{fmtUsd(totServiciosDivisa)}</div>
+            <div className="text-right text-emerald-600">{fmtUsd(totServiciosEfec)}</div>
           </div>
         </div>
       </AccordionSection>
@@ -415,6 +435,10 @@ export function ReporteForm({ especialidades, unidades }: {
                   <Label className="text-xs">Ingreso en Divisa ($)</Label>
                   <NumInput value={ant.ingresoDivisa} decimal onChange={v => setAnticipos(prev => { const n = [...prev]; n[idx] = { ...n[idx], ingresoDivisa: v }; return n; })} />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Efectivo $ entregado</Label>
+                  <NumInput value={ant.efectivoUsd} decimal onChange={v => setAnticipos(prev => { const n = [...prev]; n[idx] = { ...n[idx], efectivoUsd: v }; return n; })} />
+                </div>
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label className="text-xs">Aseguradora (opcional)</Label>
                   <AseguradoraSelect
@@ -428,7 +452,7 @@ export function ReporteForm({ especialidades, unidades }: {
             </div>
           ))}
           <Button type="button" variant="outline"
-            onClick={() => setAnticipos(prev => [...prev, { tipo: "HOSPITALIZACION", totalBs: 0, ingresoDivisa: 0, numPacientes: 1, pacienteNombre: "", estado: "PENDIENTE", aseguradoraId: "", _nuevaAseg: "" }])}>
+            onClick={() => setAnticipos(prev => [...prev, { tipo: "HOSPITALIZACION", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, numPacientes: 1, pacienteNombre: "", estado: "PENDIENTE", aseguradoraId: "", _nuevaAseg: "" }])}>
             <Plus className="h-4 w-4" /> Agregar anticipo
           </Button>
           {anticipos.length > 0 && (
@@ -485,12 +509,16 @@ export function ReporteForm({ especialidades, unidades }: {
                   <Label className="text-xs">Ingreso Divisa ($)</Label>
                   <NumInput value={c.ingresoDivisa} decimal onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], ingresoDivisa: v }; return n; })} />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Efectivo $ entregado</Label>
+                  <NumInput value={c.efectivoUsd} decimal onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], efectivoUsd: v }; return n; })} />
+                </div>
                 <div className="space-y-1.5"><Label className="text-xs">Nº Pacientes</Label><NumInput value={c.numPacientes} onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], numPacientes: v }; return n; })} /></div>
               </div>
             </div>
           ))}
           <Button type="button" variant="outline"
-            onClick={() => setCuentas(prev => [...prev, { nombreConvenio: "", totalBs: 0, ingresoDivisa: 0, numPacientes: 0, comentarios: "", aseguradoraId: "", _nuevaAseg: "" }])}>
+            onClick={() => setCuentas(prev => [...prev, { nombreConvenio: "", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, numPacientes: 0, comentarios: "", aseguradoraId: "", _nuevaAseg: "" }])}>
             <Plus className="h-4 w-4" /> Agregar convenio
           </Button>
         </div>
@@ -511,9 +539,10 @@ export function ReporteForm({ especialidades, unidades }: {
       {/* Total general */}
       <div className="rounded-xl border-2 border-[var(--primary)] bg-[var(--card)] p-4 shadow-sm">
         <div className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wide mb-3">Total General</div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
           <div><div className="text-xs text-[var(--muted-foreground)]">Total Bs.</div><div className="text-xl font-bold">{fmtBs(totalBs)}</div></div>
           <div><div className="text-xs text-[var(--muted-foreground)]">Ingreso Divisa</div><div className="text-xl font-bold text-amber-600">{fmtUsd(totalDivisa)}</div></div>
+          <div><div className="text-xs text-[var(--muted-foreground)]">Efectivo $ HCDE</div><div className="text-xl font-bold text-emerald-600">{fmtUsd(totalEfectivo)}</div></div>
           <div><div className="text-xs text-[var(--muted-foreground)]">Pacientes</div><div className="text-xl font-bold">{fmtInt(totalPac)}</div></div>
           <div><div className="text-xs text-[var(--muted-foreground)]">Ingreso Clínica $</div><div className="text-xl font-bold text-emerald-600">{fmtUsd(totConsultasClinica)}</div></div>
         </div>

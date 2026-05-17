@@ -97,7 +97,8 @@ model ConsultaLinea {
   especialidad      Especialidad  @relation(fields: [especialidadId], references: [id])
   numPacientes      Int           @default(0)
   totalBs           Float         @default(0)  // Total ingreso en Bs. (moneda principal)
-  ingresoDivisa     Float         @default(0)  // Porción recibida en USD (ya incluida en totalBs convertido)
+  ingresoDivisa     Float         @default(0)  // Porción del total reportada en USD (Total $ del PDF)
+  efectivoUsd       Float         @default(0)  // Efectivo $ entregado a HCDE (cash físico)
   porcentajeClinica Float         @default(0)  // numPacientes × honorarioClinica
   comentarios       String?
 
@@ -113,6 +114,7 @@ model ServicioLinea {
   numPacientes      Int            @default(0)
   totalBs           Float          @default(0)
   ingresoDivisa     Float          @default(0)
+  efectivoUsd       Float          @default(0)  // Efectivo $ entregado a HCDE (cash físico)
   porcentajeClinica Float          @default(0)
   comentarios       String?
 
@@ -137,6 +139,7 @@ model Anticipo {
   tipo            String       // HOSPITALIZACION | EMERGENCIA | ESTUDIOS
   totalBs         Float        @default(0)
   ingresoDivisa   Float        @default(0)
+  efectivoUsd     Float        @default(0)  // Efectivo $ entregado a HCDE (cash físico)
   numPacientes    Int          @default(1)
   pacienteNombre  String?
   comentarios     String?
@@ -152,6 +155,7 @@ model CuentaPorCobrar {
   nombreConvenio  String
   totalBs         Float        @default(0)
   ingresoDivisa   Float        @default(0)
+  efectivoUsd     Float        @default(0)  // Efectivo $ entregado a HCDE (cash físico)
   numPacientes    Int          @default(0)
   comentarios     String?
   aseguradoraId   String?

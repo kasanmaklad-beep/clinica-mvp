@@ -20,6 +20,7 @@ export interface PDFReporte {
     nombre: string;
     totalBs: number;
     ingresoDivisa: number;
+    efectivoUsd: number;
     numPacientes: number;
     porcentajeClinica: number;
   }>;
@@ -27,6 +28,7 @@ export interface PDFReporte {
     nombre: string;
     totalBs: number;
     ingresoDivisa: number;
+    efectivoUsd: number;
     numPacientes: number;
   }>;
   pacientesArea: Array<{ area: string; numPacientes: number }>;
@@ -34,12 +36,14 @@ export interface PDFReporte {
     tipo: string;
     totalBs: number;
     ingresoDivisa: number;
+    efectivoUsd: number;
     pacienteNombre?: string;
   }>;
   cuentas: Array<{
     nombreConvenio: string;
     totalBs: number;
     ingresoDivisa: number;
+    efectivoUsd: number;
   }>;
   aps: {
     consultas: number;
@@ -145,7 +149,19 @@ export function parsePdfText(text: string): PDFReporte {
     | "aps"
     | null;
   let sec: Sec = null;
-  let serviciosCount = 0; // cuántas veces aparece el header "N° Unidad Total $"
+  // En el formato nuevo del PDF el header de cada tabla se reparte en varias
+  // líneas (la columna "EFECTIVO $ ENTREGADO A HCDE" añadida en mayo 2026 hace
+  // wrap del header). Antes una sola línea contenía "N° Unidad ... Total $".
+  // Ahora "N° Unidad" queda solo en una línea y los demás keywords aparecen
+  // después. Usamos "N° Unidad" como pivote único y contamos el orden de
+  // aparición para inferir la sección.
+  //   1ª "N° Unidad de Consulta" → consultas (kw distinto)
+  //   1ª "N° Unidad"             → servicios
+  //   2ª "N° Unidad"             → pacientes (área)
+  //   3ª "N° Unidad"             → anticipos
+  //   4ª "N° Unidad"             → cuentas
+  //   5ª "N° Unidad"             → aps
+  let nUnidadCount = 0;
 
   const consultas: PDFReporte["consultas"] = [];
   const servicios: PDFReporte["servicios"] = [];
@@ -160,26 +176,18 @@ export function parsePdfText(text: string): PDFReporte {
 
   for (const line of lines) {
     // ── Detección de sección ─────────────────────────────────────────────
-    if (/N° Unidad de Consulta/.test(line) && /Total \$/.test(line)) {
+    if (/^N° Unidad de Consulta/.test(line)) {
       sec = "consultas";
       continue;
     }
-    if (
-      /N° Unidad/.test(line) &&
-      /Total \$/.test(line) &&
-      /Total Bs\./.test(line)
-    ) {
-      serviciosCount++;
+    if (/^N° Unidad/.test(line)) {
+      nUnidadCount++;
       sec =
-        serviciosCount === 1
-          ? "servicios"
-          : serviciosCount === 2
-          ? "anticipos"
-          : "cuentas";
-      continue;
-    }
-    if (/N° Unidad/.test(line) && /N° de Pacientes/.test(line)) {
-      sec = /% \$/.test(line) ? "pacientes" : "aps";
+        nUnidadCount === 1 ? "servicios"
+        : nUnidadCount === 2 ? "pacientes"
+        : nUnidadCount === 3 ? "anticipos"
+        : nUnidadCount === 4 ? "cuentas"
+        : "aps";
       continue;
     }
 
@@ -187,14 +195,39 @@ export function parsePdfText(text: string): PDFReporte {
     if (SKIP.some((p) => p.test(line))) continue;
     if (!sec) continue;
 
-    // La mayoría de filas de datos empiezan con dígito
-    if (!/^\d/.test(line) && sec !== "aps") continue;
-    if (!/^\d/.test(line) && sec === "aps") continue;
+    // Toda fila de datos arranca con dígito
+    if (!/^\d/.test(line)) continue;
 
     // ── Parseo por sección ───────────────────────────────────────────────
     switch (sec) {
       case "consultas": {
-        // N° NOMBRE  DIVISA  TOTAL_BS  PACIENTES  PCT
+        // Dos formatos posibles:
+        //   antiguo (4 nums): codigo NOMBRE TOTAL$ TOTAL_BS PAC %CLIN
+        //   nuevo   (5 nums): codigo NOMBRE EFECTIVO TOTAL$ TOTAL_BS PAC %CLIN
+        // Probamos 5-num primero. Heurística: EFECTIVO ≤ TOTAL$ y TOTAL_BS > 100
+        // (los Bs son siempre miles o más). Si falla la sanidad, asumimos
+        // formato antiguo. Esto también evita que nombres con números (ej.
+        // "Ginecología 2") se interpreten mal.
+        const m5 = line.match(
+          /^(\d+)\s+(.+?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+(\d+)\s+([\d.,]+)/
+        );
+        if (m5) {
+          const efectivo = vzNum(m5[3]);
+          const totalDolar = vzNum(m5[4]);
+          const totalBs = vzNum(m5[5]);
+          if (efectivo <= totalDolar + 0.01 && totalBs > 100) {
+            consultas.push({
+              codigo: parseInt(m5[1]),
+              nombre: m5[2].trim(),
+              efectivoUsd: efectivo,
+              ingresoDivisa: totalDolar,
+              totalBs,
+              numPacientes: parseInt(m5[6]),
+              porcentajeClinica: vzNum(m5[7]),
+            });
+            break;
+          }
+        }
         const m = line.match(
           /^(\d+)\s+(.+?)\s+([\d.,]+)\s+([\d.,]+)\s+(\d+)\s+([\d.,]+)/
         );
@@ -202,6 +235,7 @@ export function parsePdfText(text: string): PDFReporte {
           consultas.push({
             codigo: parseInt(m[1]),
             nombre: m[2].trim(),
+            efectivoUsd: 0,
             ingresoDivisa: vzNum(m[3]),
             totalBs: vzNum(m[4]),
             numPacientes: parseInt(m[5]),
@@ -211,13 +245,34 @@ export function parsePdfText(text: string): PDFReporte {
       }
 
       case "servicios": {
-        // N° NOMBRE  DIVISA  TOTAL_BS  PACIENTES
+        // Dos formatos:
+        //   antiguo (3 nums): codigo NOMBRE TOTAL$ TOTAL_BS PAC
+        //   nuevo   (4 nums): codigo NOMBRE EFECTIVO TOTAL$ TOTAL_BS PAC
+        const m4 = line.match(
+          /^(\d+)\s+(.+?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+(\d+)\s*$/
+        );
+        if (m4) {
+          const efectivo = vzNum(m4[3]);
+          const totalDolar = vzNum(m4[4]);
+          const totalBs = vzNum(m4[5]);
+          if (efectivo <= totalDolar + 0.01 && totalBs > 100) {
+            servicios.push({
+              nombre: m4[2].trim(),
+              efectivoUsd: efectivo,
+              ingresoDivisa: totalDolar,
+              totalBs,
+              numPacientes: parseInt(m4[6]),
+            });
+            break;
+          }
+        }
         const m = line.match(
           /^(\d+)\s+(.+?)\s+([\d.,]+)\s+([\d.,]+)\s+(\d+)$/
         );
         if (m)
           servicios.push({
             nombre: m[2].trim(),
+            efectivoUsd: 0,
             ingresoDivisa: vzNum(m[3]),
             totalBs: vzNum(m[4]),
             numPacientes: parseInt(m[5]),
@@ -239,13 +294,29 @@ export function parsePdfText(text: string): PDFReporte {
       }
 
       case "anticipos": {
-        // N° TIPO  DIVISA  TOTAL_BS  PACIENTES  [NOMBRE_PACIENTE]
+        // Dos formatos:
+        //   antiguo (3 nums): codigo TIPO TOTAL$ TOTAL_BS PAC [NOMBRE]
+        //   nuevo   (4 nums): codigo TIPO EFECTIVO TOTAL$ TOTAL_BS PAC [NOMBRE]
+        const m4 = line.match(
+          /^(\d+)\s+(HOSPITALIZACION|EMERGENCIA|ESTUDIOS)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+\d+(?:\s+(.+))?$/i
+        );
+        if (m4) {
+          anticipos.push({
+            tipo: m4[2].toUpperCase(),
+            efectivoUsd: vzNum(m4[3]),
+            ingresoDivisa: vzNum(m4[4]),
+            totalBs: vzNum(m4[5]),
+            pacienteNombre: m4[6]?.trim() || undefined,
+          });
+          break;
+        }
         const m = line.match(
           /^(\d+)\s+(HOSPITALIZACION|EMERGENCIA|ESTUDIOS)\s+([\d.,]+)\s+([\d.,]+)\s+\d+(?:\s+(.+))?$/i
         );
         if (m)
           anticipos.push({
             tipo: m[2].toUpperCase(),
+            efectivoUsd: 0,
             ingresoDivisa: vzNum(m[3]),
             totalBs: vzNum(m[4]),
             pacienteNombre: m[5]?.trim() || undefined,
@@ -254,21 +325,52 @@ export function parsePdfText(text: string): PDFReporte {
       }
 
       case "cuentas": {
-        // Formato real: [N°] CONVENIO  TOTAL_$  TOTAL_BS  [PACIENTES]  [%]  [$USD_COMENTARIO]
-        // - Pacientes y % suelen venir vacíos en convenios.
+        // Formato real (antiguo): [N°] CONVENIO TOTAL$ TOTAL_BS [PAC] [%] [$comentario]
+        // Formato real (nuevo):   [N°] CONVENIO EFECTIVO TOTAL$ TOTAL_BS [PAC] [%] [$comentario]
+        // - PAC y % suelen venir vacíos en convenios.
         // - El "$X,XX" del comentario puede venir pegado al $ o con espacio.
-        // - Si no hay comentario $, igual capturamos la fila con TOTAL_$ como divisa.
-        const m = line.match(
-          /^(?:\d+\s+)?(.+?)\s+([\d.,]+)\s+([\d.,]+)(?:\s+\d+)?(?:\s+[\d.,]+)?(?:\s+\$\s*([\d.,]+))?/
-        );
-        if (m)
-          cuentas.push({
-            nombreConvenio: m[1].trim(),
-            totalBs: vzNum(m[3]),
-            // Prefiere $ del comentario (USD-equivalente que el dpto reporta);
-            // si no existe, cae al valor de la columna "Total $".
-            ingresoDivisa: vzNum(m[4] || m[2]),
-          });
+        // Para decidir formato contamos cuántos números trae la línea (sin
+        // contar el código líder).
+        const allNums = line.match(/[\d.,]+/g) || [];
+        const leadingCode = /^\d+\s/.test(line) ? 1 : 0;
+        const numCount = allNums.length - leadingCode;
+        const isNuevo = numCount >= 5;
+        // Filtro: descartamos filas placeholder (nombre puramente numérico o
+        // valores en cero). El PDF a veces deja filas vacías como "1 0,00 0,00".
+        const pushIfReal = (row: PDFReporte["cuentas"][number]) => {
+          const nombreEsNumero = /^\d+$/.test(row.nombreConvenio);
+          const todoCero =
+            row.totalBs === 0 &&
+            row.ingresoDivisa === 0 &&
+            row.efectivoUsd === 0;
+          if (nombreEsNumero && todoCero) return;
+          cuentas.push(row);
+        };
+        if (isNuevo) {
+          const m = line.match(
+            /^(?:\d+\s+)?(.+?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)(?:\s+\d+)?(?:\s+[\d.,]+)?(?:\s+\$\s*([\d.,]+))?/
+          );
+          if (m)
+            pushIfReal({
+              nombreConvenio: m[1].trim(),
+              efectivoUsd: vzNum(m[2]),
+              // Si el comentario trae "$X,XX" lo usamos como ingreso divisa
+              // canónico; si no, Total $ (m[3]).
+              ingresoDivisa: vzNum(m[5] || m[3]),
+              totalBs: vzNum(m[4]),
+            });
+        } else {
+          const m = line.match(
+            /^(?:\d+\s+)?(.+?)\s+([\d.,]+)\s+([\d.,]+)(?:\s+\d+)?(?:\s+[\d.,]+)?(?:\s+\$\s*([\d.,]+))?/
+          );
+          if (m)
+            pushIfReal({
+              nombreConvenio: m[1].trim(),
+              efectivoUsd: 0,
+              ingresoDivisa: vzNum(m[4] || m[2]),
+              totalBs: vzNum(m[3]),
+            });
+        }
         break;
       }
 
@@ -297,8 +399,10 @@ export function parsePdfText(text: string): PDFReporte {
     }
   }
 
-  // "Total Facturados" no empieza con dígito → buscarlo directamente
-  const factMatch = text.match(/Total Facturados al[^0-9]*(\d+)/i);
+  // "Total Facturados" no empieza con dígito → buscarlo directamente.
+  // En el formato "Total Facturados al DD/MM/YYYY NN" tomamos el ÚLTIMO entero
+  // de la línea (NN), no el primero (que sería el "DD" de la fecha).
+  const factMatch = text.match(/Total Facturados al[^\n]*?(\d+)\s*$/im);
   if (factMatch) {
     apsF = parseInt(factMatch[1]);
     apsFound = true;

@@ -119,6 +119,7 @@ export async function POST(req: Request) {
         numPacientes: c.numPacientes,
         totalBs: c.totalBs,
         ingresoDivisa: c.ingresoDivisa,
+        efectivoUsd: c.efectivoUsd,
         porcentajeClinica: c.porcentajeClinica,
       };
     })
@@ -133,6 +134,7 @@ export async function POST(req: Request) {
         numPacientes: s.numPacientes,
         totalBs: s.totalBs,
         ingresoDivisa: s.ingresoDivisa,
+        efectivoUsd: s.efectivoUsd,
         porcentajeClinica: 0,
       };
     })
@@ -149,6 +151,7 @@ export async function POST(req: Request) {
     tipo: a.tipo as "HOSPITALIZACION" | "EMERGENCIA" | "ESTUDIOS",
     totalBs: a.totalBs,
     ingresoDivisa: a.ingresoDivisa,
+    efectivoUsd: a.efectivoUsd,
     numPacientes: 1,
     pacienteNombre: a.pacienteNombre,
     estado: "PENDIENTE" as const,
@@ -159,6 +162,7 @@ export async function POST(req: Request) {
     nombreConvenio: c.nombreConvenio,
     totalBs: c.totalBs,
     ingresoDivisa: c.ingresoDivisa,
+    efectivoUsd: c.efectivoUsd,
     numPacientes: 0,
   }));
 
