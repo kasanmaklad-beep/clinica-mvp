@@ -88,6 +88,7 @@ export default async function EditarReportePage({ params }: Params) {
     totalBs: c.totalBs,
     ingresoDivisa: c.ingresoDivisa,
     efectivoUsd: c.efectivoUsd,
+    tipoConvenio: (c.tipoConvenio as "SEGURO" | "ANUALIDAD" | "OTRO"),
     numPacientes: c.numPacientes,
     comentarios: c.comentarios ?? "",
     aseguradoraId: c.aseguradoraId ?? "",

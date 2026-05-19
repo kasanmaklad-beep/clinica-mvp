@@ -46,6 +46,7 @@ const cuentaSchema = z.object({
   ingresoDivisa: z.number().min(0).default(0),
   efectivoUsd: z.number().min(0).default(0),
   totalBs: z.number().min(0).default(0),
+  tipoConvenio: z.enum(["SEGURO", "ANUALIDAD", "OTRO"]).default("OTRO"),
   numPacientes: z.number().int().min(0).default(0),
   comentarios: z.string().optional(),
   aseguradoraId: z.string().optional().nullable(),

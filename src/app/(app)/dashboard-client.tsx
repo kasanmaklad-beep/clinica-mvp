@@ -148,7 +148,7 @@ export interface ReporteDashboard {
   servicios: { unidad: string; categoria: string; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd: number }[];
   pacientesArea: { area: string; numPacientes: number }[];
   anticipos: { tipo: string; pacienteNombre: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; estado: string }[];
-  cuentasPorCobrar: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; numPacientes: number; comentarios: string | null }[];
+  cuentasPorCobrar: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; tipoConvenio: "SEGURO" | "ANUALIDAD" | "OTRO"; numPacientes: number; comentarios: string | null }[];
   aps: { consultas: number; laboratoriosImagenes: number; movimientosDia: number; totalFacturados: number } | null;
 }
 
@@ -201,7 +201,7 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
           .map((s: { unidadServicio: { nombre: string; categoria: string }; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd?: number }) => ({ unidad: s.unidadServicio.nombre, categoria: s.unidadServicio.categoria, numPacientes: s.numPacientes, totalBs: s.totalBs, ingresoDivisa: s.ingresoDivisa, efectivoUsd: s.efectivoUsd ?? 0 })),
         pacientesArea: (r.pacientesArea || []).map((p: { area: string; numPacientes: number }) => ({ area: p.area, numPacientes: p.numPacientes })),
         anticipos: (r.anticipos || []).map((a: { tipo: string; pacienteNombre: string | null; totalBs: number; ingresoDivisa: number; efectivoUsd?: number; estado: string }) => ({ tipo: a.tipo, pacienteNombre: a.pacienteNombre ?? "", totalBs: a.totalBs, ingresoDivisa: a.ingresoDivisa, efectivoUsd: a.efectivoUsd ?? 0, estado: a.estado })),
-        cuentasPorCobrar: (r.cuentasPorCobrar || []).map((c: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd?: number; numPacientes: number; comentarios: string | null }) => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd ?? 0, numPacientes: c.numPacientes, comentarios: c.comentarios })),
+        cuentasPorCobrar: (r.cuentasPorCobrar || []).map((c: { id: string; nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd?: number; tipoConvenio?: string; numPacientes: number; comentarios: string | null }) => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd ?? 0, tipoConvenio: ((c.tipoConvenio as "SEGURO" | "ANUALIDAD" | "OTRO" | undefined) ?? "OTRO"), numPacientes: c.numPacientes, comentarios: c.comentarios })),
         aps: r.aps ? { consultas: r.aps.consultas, laboratoriosImagenes: r.aps.laboratoriosImagenes, movimientosDia: r.aps.movimientosDia, totalFacturados: r.aps.totalFacturados } : null,
       });
     }
@@ -261,6 +261,17 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
   const totCuentasBs = reporte.cuentasPorCobrar.reduce((s, c) => s + c.totalBs, 0);
   const totCuentasDiv = reporte.cuentasPorCobrar.reduce((s, c) => s + c.ingresoDivisa, 0);
   const totCuentasPac = reporte.cuentasPorCobrar.reduce((s, c) => s + c.numPacientes, 0);
+
+  // Separación convenios (SEGURO + OTRO) vs anualidades (ANUALIDAD)
+  const cuentasConvenios = reporte.cuentasPorCobrar.filter(c => c.tipoConvenio !== "ANUALIDAD");
+  const cuentasAnualidades = reporte.cuentasPorCobrar.filter(c => c.tipoConvenio === "ANUALIDAD");
+  const totConvBs = cuentasConvenios.reduce((s, c) => s + c.totalBs, 0);
+  const totConvDiv = cuentasConvenios.reduce((s, c) => s + c.ingresoDivisa, 0);
+  const totConvEfec = cuentasConvenios.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
+  const totConvPac = cuentasConvenios.reduce((s, c) => s + c.numPacientes, 0);
+  const totAnualBs = cuentasAnualidades.reduce((s, c) => s + c.totalBs, 0);
+  const totAnualDiv = cuentasAnualidades.reduce((s, c) => s + c.ingresoDivisa, 0);
+  const totAnualEfec = cuentasAnualidades.reduce((s, c) => s + (c.efectivoUsd || 0), 0);
   const totalBs = totConsBs + totServBs + totAntBs + totCuentasBs;
   const totalDivisa = totConsDiv + totServDiv + totAntDiv + totCuentasDiv;
   const totalPac = totConsPac + totServPac + totCuentasPac;
@@ -494,41 +505,36 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
       <CollapseSection
         icon={HandCoins}
         color="bg-sky-600"
-        title="Cuentas por Cobrar / Convenios"
-        subtitle={reporte.cuentasPorCobrar.length > 0 ? `${reporte.cuentasPorCobrar.length} convenios · ${fmtBs(totCuentasBs)} ≈ ${fmtUsd(bsToUsd(totCuentasBs))}` : "Sin cuentas por cobrar"}
-        empty={reporte.cuentasPorCobrar.length === 0}
+        title="Convenios / Seguros por Cobrar"
+        subtitle={cuentasConvenios.length > 0 ? `${cuentasConvenios.length} convenios · ${fmtBs(totConvBs)} ≈ ${fmtUsd(bsToUsd(totConvBs))}` : "Sin convenios"}
+        empty={cuentasConvenios.length === 0}
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-[var(--muted)] text-left">
-              <tr>
-                <th className="p-2.5 font-medium">Convenio</th>
-                <th className="p-2.5 font-medium text-right">Bs.</th>
-                <th className="p-2.5 font-medium text-right">≈ $</th>
-                <th className="p-2.5 font-medium text-right">Div. $</th>
-                <th className="p-2.5 font-medium text-right">Pac.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reporte.cuentasPorCobrar.map((c, i) => (
-                <tr key={i} className="border-t border-[var(--border)]">
-                  <td className="p-2.5">{c.nombreConvenio}</td>
-                  <td className="p-2.5 text-right text-xs">{c.totalBs > 0 ? fmtBs(c.totalBs) : "—"}</td>
-                  <td className="p-2.5 text-right text-amber-600 font-medium">{c.totalBs > 0 ? fmtUsd(bsToUsd(c.totalBs)) : "—"}</td>
-                  <td className="p-2.5 text-right text-sky-600 text-xs">{c.ingresoDivisa > 0 ? fmtUsd(c.ingresoDivisa) : "—"}</td>
-                  <td className="p-2.5 text-right">{c.numPacientes > 0 ? c.numPacientes : "—"}</td>
-                </tr>
-              ))}
-              <tr className="border-t-2 bg-[var(--muted)] font-semibold">
-                <td className="p-2.5">Totales</td>
-                <td className="p-2.5 text-right text-xs">{fmtBs(totCuentasBs)}</td>
-                <td className="p-2.5 text-right text-amber-600">{fmtUsd(bsToUsd(totCuentasBs))}</td>
-                <td className="p-2.5 text-right text-sky-600 text-xs">{totCuentasDiv > 0 ? fmtUsd(totCuentasDiv) : "—"}</td>
-                <td className="p-2.5 text-right">{totCuentasPac > 0 ? fmtInt(totCuentasPac) : "—"}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <CuentasTable
+          rows={cuentasConvenios}
+          totBs={totConvBs}
+          totDiv={totConvDiv}
+          totEfec={totConvEfec}
+          totPac={totConvPac}
+          bsToUsd={bsToUsd}
+        />
+      </CollapseSection>
+
+      <CollapseSection
+        icon={HandCoins}
+        color="bg-purple-600"
+        title="Anualidades de Doctores"
+        subtitle={cuentasAnualidades.length > 0 ? `${cuentasAnualidades.length} médicos · ${fmtBs(totAnualBs)} ≈ ${fmtUsd(bsToUsd(totAnualBs))}` : "Sin anualidades"}
+        empty={cuentasAnualidades.length === 0}
+      >
+        <CuentasTable
+          rows={cuentasAnualidades}
+          totBs={totAnualBs}
+          totDiv={totAnualDiv}
+          totEfec={totAnualEfec}
+          totPac={0}
+          bsToUsd={bsToUsd}
+          ocultarPacientes
+        />
       </CollapseSection>
 
       <CollapseSection
@@ -1086,6 +1092,51 @@ function KpiCard({ icon: Icon, label, value, sub, accent, big }: { icon: React.C
         {sub && <div className="text-xs text-amber-600 mt-0.5 font-medium">{sub}</div>}
       </CardContent>
     </Card>
+  );
+}
+
+function CuentasTable({ rows, totBs, totDiv, totEfec, totPac, bsToUsd, ocultarPacientes }: {
+  rows: { nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; numPacientes: number }[];
+  totBs: number; totDiv: number; totEfec: number; totPac: number;
+  bsToUsd: (bs: number) => number;
+  ocultarPacientes?: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-[var(--muted)] text-left">
+          <tr>
+            <th className="p-2.5 font-medium">Nombre</th>
+            <th className="p-2.5 font-medium text-right">Bs.</th>
+            <th className="p-2.5 font-medium text-right">≈ $</th>
+            <th className="p-2.5 font-medium text-right">Div. $</th>
+            <th className="p-2.5 font-medium text-right">Efec. $</th>
+            {!ocultarPacientes && <th className="p-2.5 font-medium text-right">Pac.</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((c, i) => (
+            <tr key={i} className="border-t border-[var(--border)]">
+              <td className="p-2.5">{c.nombreConvenio}</td>
+              <td className="p-2.5 text-right text-xs">{c.totalBs > 0 ? fmtBs(c.totalBs) : "—"}</td>
+              <td className="p-2.5 text-right text-amber-600 font-medium">{c.totalBs > 0 ? fmtUsd(bsToUsd(c.totalBs)) : "—"}</td>
+              <td className="p-2.5 text-right text-sky-600 text-xs">{c.ingresoDivisa > 0 ? fmtUsd(c.ingresoDivisa) : "—"}</td>
+              <td className="p-2.5 text-right text-emerald-600 text-xs">{(c.efectivoUsd || 0) > 0 ? fmtUsd(c.efectivoUsd) : "—"}</td>
+              {!ocultarPacientes && <td className="p-2.5 text-right">{c.numPacientes > 0 ? c.numPacientes : "—"}</td>}
+            </tr>
+          ))}
+          <tr className="border-t-2 bg-[var(--muted)] font-semibold">
+            <td className="p-2.5">Totales</td>
+            <td className="p-2.5 text-right text-xs">{fmtBs(totBs)}</td>
+            <td className="p-2.5 text-right text-amber-600">{fmtUsd(bsToUsd(totBs))}</td>
+            <td className="p-2.5 text-right text-sky-600 text-xs">{totDiv > 0 ? fmtUsd(totDiv) : "—"}</td>
+            <td className="p-2.5 text-right text-emerald-600 text-xs">{totEfec > 0 ? fmtUsd(totEfec) : "—"}</td>
+            {!ocultarPacientes && <td className="p-2.5 text-right">{totPac > 0 ? fmtInt(totPac) : "—"}</td>}
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 

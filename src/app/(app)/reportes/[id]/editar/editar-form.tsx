@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { AccordionSection } from "@/components/ui/accordion";
 import { fmtUsd, fmtBs, fmtInt } from "@/lib/utils";
-import { Save, CheckCircle, Plus, Trash2, ArrowLeft } from "lucide-react";
+import { clasificarConvenio } from "@/lib/devaluacion";
+import { validarConsulta, validarCuenta, validarAnticipo, type Warning } from "@/lib/validacion-ingreso";
+import { Save, CheckCircle, Plus, Trash2, ArrowLeft, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 
 interface Especialidad { id: string; codigo: number; nombre: string; honorarioClinica: number }
@@ -19,7 +21,7 @@ interface ConsultaRow { especialidadId: string; numPacientes: number; totalBs: n
 interface ServicioRow { unidadServicioId: string; numPacientes: number; totalBs: number; ingresoDivisa: number; efectivoUsd: number; porcentajeClinica: number }
 interface PacienteAreaRow { area: "EMERGENCIA" | "HOSPITALIZACION" | "UCI"; numPacientes: number }
 interface AnticipoRow { tipo: "HOSPITALIZACION" | "EMERGENCIA" | "ESTUDIOS"; totalBs: number; ingresoDivisa: number; efectivoUsd: number; numPacientes: number; pacienteNombre: string; estado: "PENDIENTE" | "APLICADO"; aseguradoraId: string; _nuevaAseg: string }
-interface CuentaRow { nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; numPacientes: number; comentarios: string; aseguradoraId: string; _nuevaAseg: string }
+interface CuentaRow { nombreConvenio: string; totalBs: number; ingresoDivisa: number; efectivoUsd: number; tipoConvenio: "SEGURO" | "ANUALIDAD" | "OTRO"; numPacientes: number; comentarios: string; aseguradoraId: string; _nuevaAseg: string }
 
 function NumInput({ value, onChange, decimal = false }: { value: number; onChange: (n: number) => void; decimal?: boolean }) {
   return (
@@ -234,9 +236,25 @@ export function EditarReporteForm({
           {especialidades.map((esp, idx) => {
             const row = consultas[idx];
             const hasData = row.numPacientes > 0 || row.totalBs > 0;
+            const warnings = hasData ? validarConsulta({
+              numPacientes: row.numPacientes,
+              totalBs: row.totalBs,
+              ingresoDivisa: row.ingresoDivisa,
+              efectivoUsd: row.efectivoUsd,
+              porcentajeClinica: row.porcentajeClinica,
+              honorarioClinica: esp.honorarioClinica,
+              tasa,
+            }) : [];
+            const hasWarn = warnings.length > 0;
+            const borderClass = hasWarn
+              ? "border-amber-400 bg-amber-50/60 dark:border-amber-700 dark:bg-amber-950/30"
+              : hasData
+              ? "border-blue-200 bg-blue-50/50 dark:border-blue-900/50 dark:bg-blue-950/20"
+              : "border-[var(--border)]";
             return (
-              <div key={esp.id} className={`rounded-lg border p-3 transition-colors ${hasData ? "border-blue-200 bg-blue-50/50 dark:border-blue-900/50 dark:bg-blue-950/20" : "border-[var(--border)]"}`}>
+              <div key={esp.id} className={`rounded-lg border p-3 transition-colors ${borderClass}`}>
                 <div className="sm:hidden text-sm font-medium mb-2">{esp.nombre}<span className="ml-2 text-xs text-[var(--muted-foreground)]">hon: ${esp.honorarioClinica}/pac</span></div>
+                {hasWarn && <WarningBanner warnings={warnings} />}
                 <div className="grid grid-cols-2 sm:grid-cols-[2.2fr_0.9fr_1.1fr_0.9fr_0.9fr_1fr] gap-2 items-center">
                   <div className="hidden sm:block text-sm">{esp.nombre}<div className="text-xs text-[var(--muted-foreground)]">${esp.honorarioClinica}/pac</div></div>
                   <div className="space-y-1"><Label className="sm:hidden text-xs">Pacientes</Label><NumInput value={row.numPacientes} onChange={v => updateConsulta(idx, "numPacientes", v)} /></div>
@@ -313,14 +331,18 @@ export function EditarReporteForm({
         subtitle={anticipos.length > 0 ? `${anticipos.length} anticipos · ${fmtBs(totAnticiposBs)}` : "Sin anticipos"}
         badge={anticipos.length > 0 ? <Badge tone="warning">{anticipos.length}</Badge> : undefined}>
         <div className="space-y-3">
-          {anticipos.map((ant, idx) => (
-            <div key={idx} className="rounded-lg border border-[var(--border)] p-3 space-y-3">
+          {anticipos.map((ant, idx) => {
+            const warnings = validarAnticipo({ totalBs: ant.totalBs, ingresoDivisa: ant.ingresoDivisa, efectivoUsd: ant.efectivoUsd });
+            const hasWarn = warnings.length > 0;
+            return (
+            <div key={idx} className={`rounded-lg border p-3 space-y-3 ${hasWarn ? "border-amber-400 bg-amber-50/60 dark:border-amber-700 dark:bg-amber-950/30" : "border-[var(--border)]"}`}>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Anticipo #{idx + 1}</span>
                 <Button type="button" size="icon" variant="ghost" onClick={() => setAnticipos(prev => prev.filter((_, i) => i !== idx))}>
                   <Trash2 className="h-4 w-4 text-[var(--destructive)]" />
                 </Button>
               </div>
+              {hasWarn && <WarningBanner warnings={warnings} />}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Tipo</Label>
@@ -343,7 +365,7 @@ export function EditarReporteForm({
                 </div>
               </div>
             </div>
-          ))}
+          );})}
           <Button type="button" variant="outline" onClick={() => setAnticipos(prev => [...prev, { tipo: "HOSPITALIZACION", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, numPacientes: 1, pacienteNombre: "", estado: "PENDIENTE", aseguradoraId: "", _nuevaAseg: "" }])}>
             <Plus className="h-4 w-4" /> Agregar anticipo
           </Button>
@@ -364,37 +386,49 @@ export function EditarReporteForm({
         subtitle={cuentas.length > 0 ? `${cuentas.length} convenios · ${fmtBs(totCuentasBs)}` : "Sin cuentas"}
         badge={cuentas.length > 0 ? <Badge>{cuentas.length}</Badge> : undefined}>
         <div className="space-y-3">
-          {cuentas.map((c, idx) => (
-            <div key={idx} className="rounded-lg border border-[var(--border)] p-3 space-y-3">
+          {cuentas.map((c, idx) => {
+            const warnings = validarCuenta({ totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd, tipoConvenio: c.tipoConvenio });
+            const hasWarn = warnings.length > 0;
+            return (
+            <div key={idx} className={`rounded-lg border p-3 space-y-3 ${hasWarn ? "border-amber-400 bg-amber-50/60 dark:border-amber-700 dark:bg-amber-950/30" : "border-[var(--border)]"}`}>
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Convenio #{idx + 1}</span>
+                <span className="text-sm font-medium">{c.tipoConvenio === "ANUALIDAD" ? "Anualidad" : "Convenio"} #{idx + 1}</span>
                 <Button type="button" size="icon" variant="ghost" onClick={() => setCuentas(prev => prev.filter((_, i) => i !== idx))}>
                   <Trash2 className="h-4 w-4 text-[var(--destructive)]" />
                 </Button>
               </div>
+              {hasWarn && <WarningBanner warnings={warnings} />}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label className="text-xs">Aseguradora / Convenio</Label>
                   <AseguradoraSelect value={c.aseguradoraId}
-                    onChange={asegId => { const aseg = aseguradoras.find(a => a.id === asegId); setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: asegId, nombreConvenio: aseg?.nombre || n[idx].nombreConvenio }; return n; }); }}
+                    onChange={asegId => { const aseg = aseguradoras.find(a => a.id === asegId); const nuevoNombre = aseg?.nombre || c.nombreConvenio; setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: asegId, nombreConvenio: nuevoNombre, tipoConvenio: clasificarConvenio(nuevoNombre) }; return n; }); }}
                     aseguradoras={aseguradoras}
-                    onNew={async (nombre) => { const nueva = await crearAseguradora(nombre); if (nueva) setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: nueva.id, nombreConvenio: nueva.nombre }; return n; }); return nueva; }}
+                    onNew={async (nombre) => { const nueva = await crearAseguradora(nombre); if (nueva) setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: nueva.id, nombreConvenio: nueva.nombre, tipoConvenio: clasificarConvenio(nueva.nombre) }; return n; }); return nueva; }}
                     placeholder="Seleccionar o crear aseguradora…" />
                 </div>
                 {!c.aseguradoraId && (
                   <div className="sm:col-span-2 space-y-1.5">
                     <Label className="text-xs">Nombre del convenio</Label>
-                    <Input value={c.nombreConvenio} onChange={e => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], nombreConvenio: e.target.value }; return n; })} placeholder="Empresa, institución..." />
+                    <Input value={c.nombreConvenio} onChange={e => { const nombre = e.target.value; setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], nombreConvenio: nombre, tipoConvenio: clasificarConvenio(nombre) }; return n; }); }} placeholder="Empresa, institución..." />
                   </div>
                 )}
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label className="text-xs">Tipo (auto-clasificado, corrige si está mal)</Label>
+                  <select value={c.tipoConvenio} onChange={e => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], tipoConvenio: e.target.value as CuentaRow["tipoConvenio"] }; return n; })} className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm focus-visible:outline-none">
+                    <option value="SEGURO">💼 Convenio / Seguro</option>
+                    <option value="ANUALIDAD">🎓 Anualidad de doctor</option>
+                    <option value="OTRO">📋 Otro</option>
+                  </select>
+                </div>
                 <div className="space-y-1.5"><Label className="text-xs">Total Bs.</Label><NumInput value={c.totalBs} decimal onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], totalBs: v }; return n; })} /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Ingreso Divisa ($)</Label><NumInput value={c.ingresoDivisa} decimal onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], ingresoDivisa: v }; return n; })} /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Efectivo $ entregado</Label><NumInput value={c.efectivoUsd} decimal onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], efectivoUsd: v }; return n; })} /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Nº Pacientes</Label><NumInput value={c.numPacientes} onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], numPacientes: v }; return n; })} /></div>
               </div>
             </div>
-          ))}
-          <Button type="button" variant="outline" onClick={() => setCuentas(prev => [...prev, { nombreConvenio: "", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, numPacientes: 0, comentarios: "", aseguradoraId: "", _nuevaAseg: "" }])}>
+          );})}
+          <Button type="button" variant="outline" onClick={() => setCuentas(prev => [...prev, { nombreConvenio: "", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, tipoConvenio: "OTRO", numPacientes: 0, comentarios: "", aseguradoraId: "", _nuevaAseg: "" }])}>
             <Plus className="h-4 w-4" /> Agregar convenio
           </Button>
         </div>
@@ -432,6 +466,19 @@ export function EditarReporteForm({
         <Button onClick={() => guardar("CERRADO")} disabled={saving}>
           <CheckCircle className="h-4 w-4" />{saving ? "..." : "Cerrar reporte"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function WarningBanner({ warnings }: { warnings: Warning[] }) {
+  return (
+    <div className="rounded-md bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 p-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-1.5">
+      <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+      <div className="space-y-0.5">
+        {warnings.map((w, i) => (
+          <div key={i}>{w.mensaje}</div>
+        ))}
       </div>
     </div>
   );

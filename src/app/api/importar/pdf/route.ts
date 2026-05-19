@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditReports } from "@/lib/roles";
 import { parsePdfText } from "@/lib/pdf-parser";
+import { clasificarConvenio } from "@/lib/devaluacion";
 import { randomUUID } from "crypto";
 
 export async function POST(req: Request) {
@@ -163,6 +164,8 @@ export async function POST(req: Request) {
     totalBs: c.totalBs,
     ingresoDivisa: c.ingresoDivisa,
     efectivoUsd: c.efectivoUsd,
+    // Auto-clasifica al importar. El admin puede corregir desde el form.
+    tipoConvenio: clasificarConvenio(c.nombreConvenio),
     numPacientes: 0,
   }));
 

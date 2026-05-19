@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { AccordionSection } from "@/components/ui/accordion";
 import { fmtUsd, fmtBs, fmtInt } from "@/lib/utils";
+import { clasificarConvenio } from "@/lib/devaluacion";
 import { Save, CheckCircle, Plus, Trash2 } from "lucide-react";
 
 interface Especialidad { id: string; codigo: number; nombre: string; honorarioClinica: number }
@@ -47,6 +48,7 @@ interface CuentaRow {
   totalBs: number;
   ingresoDivisa: number;
   efectivoUsd: number;
+  tipoConvenio: "SEGURO" | "ANUALIDAD" | "OTRO";
   numPacientes: number;
   comentarios: string;
   aseguradoraId: string;
@@ -487,12 +489,13 @@ export function ReporteForm({ especialidades, unidades }: {
                     value={c.aseguradoraId}
                     onChange={id => {
                       const aseg = aseguradoras.find(a => a.id === id);
-                      setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: id, nombreConvenio: aseg?.nombre || n[idx].nombreConvenio }; return n; });
+                      const nuevoNombre = aseg?.nombre || c.nombreConvenio;
+                      setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: id, nombreConvenio: nuevoNombre, tipoConvenio: clasificarConvenio(nuevoNombre) }; return n; });
                     }}
                     aseguradoras={aseguradoras}
                     onNew={async (nombre) => {
                       const nueva = await crearAseguradora(nombre);
-                      if (nueva) setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: nueva.id, nombreConvenio: nueva.nombre }; return n; });
+                      if (nueva) setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], aseguradoraId: nueva.id, nombreConvenio: nueva.nombre, tipoConvenio: clasificarConvenio(nueva.nombre) }; return n; });
                       return nueva;
                     }}
                     placeholder="Seleccionar o crear aseguradora…"
@@ -501,9 +504,21 @@ export function ReporteForm({ especialidades, unidades }: {
                 {!c.aseguradoraId && (
                   <div className="sm:col-span-2 space-y-1.5">
                     <Label className="text-xs">Nombre del convenio (si no es aseguradora)</Label>
-                    <Input value={c.nombreConvenio} onChange={e => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], nombreConvenio: e.target.value }; return n; })} placeholder="Empresa, institución..." />
+                    <Input value={c.nombreConvenio} onChange={e => { const nombre = e.target.value; setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], nombreConvenio: nombre, tipoConvenio: clasificarConvenio(nombre) }; return n; }); }} placeholder="Empresa, institución..." />
                   </div>
                 )}
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label className="text-xs">Tipo (auto-clasificado, corrige si está mal)</Label>
+                  <select
+                    value={c.tipoConvenio}
+                    onChange={e => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], tipoConvenio: e.target.value as CuentaRow["tipoConvenio"] }; return n; })}
+                    className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm focus-visible:outline-none"
+                  >
+                    <option value="SEGURO">💼 Convenio / Seguro</option>
+                    <option value="ANUALIDAD">🎓 Anualidad de doctor</option>
+                    <option value="OTRO">📋 Otro</option>
+                  </select>
+                </div>
                 <div className="space-y-1.5"><Label className="text-xs">Total Bs.</Label><NumInput value={c.totalBs} decimal onChange={v => setCuentas(prev => { const n = [...prev]; n[idx] = { ...n[idx], totalBs: v }; return n; })} /></div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Ingreso Divisa ($)</Label>
@@ -518,7 +533,7 @@ export function ReporteForm({ especialidades, unidades }: {
             </div>
           ))}
           <Button type="button" variant="outline"
-            onClick={() => setCuentas(prev => [...prev, { nombreConvenio: "", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, numPacientes: 0, comentarios: "", aseguradoraId: "", _nuevaAseg: "" }])}>
+            onClick={() => setCuentas(prev => [...prev, { nombreConvenio: "", totalBs: 0, ingresoDivisa: 0, efectivoUsd: 0, tipoConvenio: "OTRO", numPacientes: 0, comentarios: "", aseguradoraId: "", _nuevaAseg: "" }])}>
             <Plus className="h-4 w-4" /> Agregar convenio
           </Button>
         </div>

@@ -34,7 +34,7 @@ async function cargarReporte(id: string): Promise<ReporteDashboard | null> {
       .map(s => ({ unidad: s.unidadServicio.nombre, categoria: s.unidadServicio.categoria, numPacientes: s.numPacientes, totalBs: s.totalBs, ingresoDivisa: s.ingresoDivisa, efectivoUsd: s.efectivoUsd })),
     pacientesArea: r.pacientesArea.map(p => ({ area: p.area, numPacientes: p.numPacientes })),
     anticipos: r.anticipos.map(a => ({ tipo: a.tipo, pacienteNombre: a.pacienteNombre ?? "", totalBs: a.totalBs, ingresoDivisa: a.ingresoDivisa, efectivoUsd: a.efectivoUsd, estado: a.estado })),
-    cuentasPorCobrar: r.cuentasPorCobrar.map(c => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd, numPacientes: c.numPacientes, comentarios: c.comentarios })),
+    cuentasPorCobrar: r.cuentasPorCobrar.map(c => ({ id: c.id, nombreConvenio: c.nombreConvenio, totalBs: c.totalBs, ingresoDivisa: c.ingresoDivisa, efectivoUsd: c.efectivoUsd, tipoConvenio: c.tipoConvenio as "SEGURO" | "ANUALIDAD" | "OTRO", numPacientes: c.numPacientes, comentarios: c.comentarios })),
     aps: r.aps ? { consultas: r.aps.consultas, laboratoriosImagenes: r.aps.laboratoriosImagenes, movimientosDia: r.aps.movimientosDia, totalFacturados: r.aps.totalFacturados } : null,
   };
 }

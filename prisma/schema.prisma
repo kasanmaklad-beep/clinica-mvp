@@ -156,6 +156,10 @@ model CuentaPorCobrar {
   totalBs         Float        @default(0)
   ingresoDivisa   Float        @default(0)
   efectivoUsd     Float        @default(0)  // Efectivo $ entregado a HCDE (cash físico)
+  // Clasificación SEGURO | ANUALIDAD | OTRO. Se asigna automáticamente desde
+  // el nombre del convenio usando clasificarConvenio() pero el admin puede
+  // sobreescribirlo desde el form de edición si la inferencia se equivoca.
+  tipoConvenio    String       @default("OTRO")
   numPacientes    Int          @default(0)
   comentarios     String?
   aseguradoraId   String?
