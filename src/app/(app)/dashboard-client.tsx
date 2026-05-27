@@ -290,6 +290,19 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
   const haySiguiente = idx > 0;
   const hayAnterior = idx < reportesLista.length - 1;
 
+  // ── Resumen Día/Mes (pacientes + ingreso real clínica = suma de %CLIN) ──
+  // El usuario quiere ver el "verde" — porcentajeClinica de consultas — como
+  // métrica principal del ingreso que efectivamente entra a la clínica.
+  // Para el mes: agregamos también porcentajeClinica de servicios (que ya
+  // viene en clinicaUsd dentro de MonthData) — esto incluye Lab/Imágenes.
+  const fechaReporte = new Date(reporte.fecha);
+  const mkKey = `${fechaReporte.getUTCFullYear()}-${String(fechaReporte.getUTCMonth() + 1).padStart(2, "0")}`;
+  const mesActual = months.find(m => m.mes === mkKey);
+  const pacDia = totConsPac; // pacientes de consultas en el día
+  const pacMes = mesActual?.pacConsultas ?? 0;
+  const ingresoDia = totConsultasClinicaOnly; // %CLIN consultas del día (el "verde")
+  const ingresoMes = mesActual?.clinicaUsd ?? 0;
+
   return (
     <div className="space-y-6 pb-8">
       {/* ═════════ VISTA EJECUTIVA MENSUAL ═════════ */}
@@ -302,6 +315,15 @@ export function DashboardClient({ reportesLista, initialReporte, canCreate, char
 
       {/* ═════════ DEVALUACIÓN ═════════ */}
       {devaluacion.tasa > 0 && <DevaluacionBanner data={devaluacion} />}
+
+      {/* ═════════ RESUMEN DÍA / MES ═════════ */}
+      <ResumenDiaMes
+        fechaDia={fechaReporte}
+        pacDia={pacDia}
+        ingresoDia={ingresoDia}
+        pacMes={pacMes}
+        ingresoMes={ingresoMes}
+      />
 
       {/* ═════════ DETALLE DIARIO ═════════ */}
       <div className="pt-2 border-t border-[var(--border)]">
@@ -973,6 +995,83 @@ function ExecutiveMonthly({
         )}
       </div>
     </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// RESUMEN DÍA / MES — Pacientes + Ingreso real clínica (suma %CLIN)
+// ══════════════════════════════════════════════════════════════
+function ResumenDiaMes({
+  fechaDia,
+  pacDia,
+  ingresoDia,
+  pacMes,
+  ingresoMes,
+}: {
+  fechaDia: Date;
+  pacDia: number;
+  ingresoDia: number;
+  pacMes: number;
+  ingresoMes: number;
+}) {
+  const labelDia = format(fechaDia, "d 'de' MMMM", { locale: es });
+  const labelMes = format(fechaDia, "MMMM yyyy", { locale: es });
+  return (
+    <Card className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-emerald-500/20">
+      <CardContent className="p-4 sm:p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+          {/* Día */}
+          <div className="space-y-1.5 sm:border-r sm:border-[var(--border)] sm:pr-6">
+            <div className="text-[10px] uppercase tracking-wider text-[var(--muted-foreground)] font-semibold">
+              Día · {labelDia}
+            </div>
+            <div className="flex items-baseline gap-4 flex-wrap">
+              <div>
+                <div className="text-2xl sm:text-3xl font-black text-[var(--foreground)] tabular-nums">
+                  {fmtInt(pacDia)}
+                </div>
+                <div className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide">
+                  pacientes
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl sm:text-3xl font-black text-emerald-600 tabular-nums">
+                  {fmtUsd(ingresoDia)}
+                </div>
+                <div className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide">
+                  ingreso clínica
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Mes */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] uppercase tracking-wider text-[var(--muted-foreground)] font-semibold capitalize">
+              Mes · {labelMes}
+            </div>
+            <div className="flex items-baseline gap-4 flex-wrap">
+              <div>
+                <div className="text-2xl sm:text-3xl font-black text-[var(--foreground)] tabular-nums">
+                  {fmtInt(pacMes)}
+                </div>
+                <div className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide">
+                  pacientes acumulados
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl sm:text-3xl font-black text-emerald-600 tabular-nums">
+                  {fmtUsd(ingresoMes)}
+                </div>
+                <div className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide">
+                  ingreso clínica
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
